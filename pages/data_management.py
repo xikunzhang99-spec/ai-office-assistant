@@ -23,8 +23,8 @@ TABLE_NAMES_CN = {
 def render():
     st.title("数据管理")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "数据库统计", "知识库维护", "数据导出", "批量清理", "工作流日志", "Obsidian 同步", "通知设置",
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "数据库统计", "知识库维护", "知识块入库", "数据导出", "批量清理", "工作流日志", "Obsidian 同步", "通知设置",
     ])
 
     with tab1:
@@ -32,14 +32,16 @@ def render():
     with tab2:
         _render_kb_maintenance()
     with tab3:
-        _render_export()
+        _render_chunk_ingestion()
     with tab4:
-        _render_cleanup()
+        _render_export()
     with tab5:
-        _render_workflow_logs()
+        _render_cleanup()
     with tab6:
-        _render_obsidian_sync()
+        _render_workflow_logs()
     with tab7:
+        _render_obsidian_sync()
+    with tab8:
         _render_notification_settings()
 
 
@@ -114,6 +116,84 @@ def _render_kb_maintenance():
             progress_bar.progress(1.0, text="完成!")
             st.success(f"Embedding 已生成，成功 {count} 条")
             st.rerun()
+
+
+def _render_chunk_ingestion():
+    """知识块入库 — 从各数据源生成 knowledge_chunks 并向量化。"""
+    st.subheader("知识块入库")
+
+    from services.knowledge_ingestion import (
+        ingest_all, ingest_obsidian_notes, ingest_projects_and_timeline,
+        ingest_daily_summaries, clear_all_chunks, get_chunk_stats,
+    )
+    from services.embedding_service import count_chunk_embeddings
+
+    # 当前状态
+    stats = get_chunk_stats()
+    emb_count = count_chunk_embeddings()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("知识块总数", stats["total"])
+    with col2:
+        st.metric("已向量化", emb_count)
+
+    if stats["by_type"]:
+        st.caption("按类型分布: " + ", ".join(
+            f"{k}: {v}" for k, v in stats["by_type"].items()
+        ))
+
+    st.divider()
+
+    # 入库按钮
+    st.write("**按来源入库**")
+
+    col_a, col_b, col_c = st.columns(3)
+
+    with col_a:
+        if st.button("从 Obsidian 入库", use_container_width=True, key="btn_ingest_obsidian"):
+            with st.spinner("从 Obsidian Vault 读取并入库..."):
+                n = ingest_obsidian_notes()
+                if n > 0:
+                    st.success(f"Obsidian: {n} 个知识块已入库")
+                else:
+                    st.info("未找到 Obsidian 笔记（请检查 OBSIDIAN_VAULT_PATH 配置）")
+                st.rerun()
+
+    with col_b:
+        if st.button("从项目/时间轴入库", use_container_width=True, key="btn_ingest_projects"):
+            with st.spinner("读取项目和时间轴记录..."):
+                n = ingest_projects_and_timeline()
+                st.success(f"项目/时间轴: {n} 个知识块已入库")
+                st.rerun()
+
+    with col_c:
+        if st.button("从每日总结入库", use_container_width=True, key="btn_ingest_summaries"):
+            with st.spinner("读取每日总结和随手记..."):
+                n = ingest_daily_summaries()
+                st.success(f"总结/笔记: {n} 个知识块已入库")
+                st.rerun()
+
+    st.divider()
+
+    # 全量入库
+    col_all, col_clear = st.columns(2)
+    with col_all:
+        if st.button("全量入库", type="primary", use_container_width=True, key="btn_ingest_all"):
+            with st.spinner("全量入库中，请耐心等待..."):
+                results = ingest_all()
+                st.success(f"入库完成: {results}")
+                st.rerun()
+
+    with col_clear:
+        clear_confirm = st.checkbox("确认清空", key="confirm_clear_chunks")
+        if st.button("清空重建知识块", use_container_width=True,
+                     key="btn_clear_chunks", disabled=not clear_confirm):
+            deleted = clear_all_chunks()
+            st.success(f"已清空 {deleted} 个知识块")
+            st.rerun()
+
+    st.divider()
+    st.caption("入库后的知识块可在「RAG问答」页面进行语义检索和智能问答。")
 
 
 def _render_export():

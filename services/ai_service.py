@@ -134,3 +134,40 @@ def generate_daily_summary(
 ## 明日建议"""
 
     return _chat(prompt)
+
+
+def detect_content_intent(content: str) -> dict:
+    """Detect the intent/type of content for workflow routing.
+
+    Returns: {'intent_type': str, 'confidence': float, 'reasoning': str}
+    intent_type: task, note, project_update, meeting, file_summary, daily_record, unknown
+    """
+    prompt = f"""Analyze the following content and classify it into EXACTLY ONE of these types:
+- task: a specific action item, to-do, or assignment
+- note: a general note, observation, or piece of information
+- project_update: a project status update or progress report
+- meeting: meeting notes, minutes, or discussion summary
+- file_summary: a summary or analysis of a document/file
+- daily_record: a daily journal or work log entry
+- unknown: cannot confidently classify
+
+Respond ONLY with a single line in this exact format:
+TYPE|CONFIDENCE|BRIEF_REASON
+
+Content:
+{content[:2000]}"""
+
+    result = _chat(prompt, "You are a content classifier. Respond with only the classification.",
+                   temperature=0.2, max_tokens=100)
+    try:
+        parts = result.strip().split("|", 2)
+        intent_type = parts[0].strip()
+        confidence = float(parts[1].strip()) if len(parts) > 1 else 0.5
+        reasoning = parts[2].strip() if len(parts) > 2 else ""
+        valid_types = {"task", "note", "project_update", "meeting", "file_summary", "daily_record", "unknown"}
+        if intent_type not in valid_types:
+            intent_type = "unknown"
+            confidence = 0.0
+        return {"intent_type": intent_type, "confidence": confidence, "reasoning": reasoning}
+    except Exception:
+        return {"intent_type": "unknown", "confidence": 0.0, "reasoning": "Parse error"}

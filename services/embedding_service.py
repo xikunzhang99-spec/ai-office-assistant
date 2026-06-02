@@ -268,3 +268,157 @@ def cleanup_orphan_embeddings() -> int:
             WHERE knowledge_item_id NOT IN (SELECT id FROM knowledge_items)
         """)
     return before
+
+
+# ── Chunk-level embedding (Phase 4: RAG + Semantic Search) ──
+
+def embed_and_store_chunk(chunk_id: int, text: str) -> bool:
+    """为单个 knowledge_chunk 生成并存储 embedding。"""
+    vec = get_embedding(text)
+    if not vec:
+        return False
+    execute(
+        "UPDATE knowledge_chunks SET embedding = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(vec), now_str(), chunk_id),
+    )
+    return True
+
+
+def embed_and_store_batch(chunks: list[dict], source_type: str = "",
+                          source_title: str = "", source_id: int = 0) -> int:
+    """批量为 chunks 生成 embedding 并存储。
+
+    Args:
+        chunks: [{"chunk_id": int, "content": str, "metadata": dict}, ...]
+        source_type, source_title, source_id: 未使用，保留兼容
+
+    Returns:
+        成功生成的数量
+    """
+    count = 0
+    for chunk in chunks:
+        chunk_id = chunk.get("chunk_id")
+        content = chunk.get("content", "")
+        if chunk_id and content:
+            if embed_and_store_chunk(chunk_id, content):
+                count += 1
+    return count
+
+
+def search_chunks_numpy(query_embedding: list, top_k: int = 5) -> list:
+    """使用 numpy 在 knowledge_chunks 中进行语义搜索。
+
+    Args:
+        query_embedding: 查询文本的 embedding 向量
+        top_k: 返回结果数量
+
+    Returns:
+        [{chunk_id, source_type, source_id, source_title, content, score, metadata_json}, ...]
+    """
+    rows = fetch_all(
+        """SELECT id, source_type, source_id, source_title, content,
+                  metadata_json, embedding
+           FROM knowledge_chunks WHERE embedding IS NOT NULL"""
+    )
+    if not rows:
+        return []
+
+    if _HAS_NUMPY and len(rows) >= _NUMPY_THRESHOLD:
+        return _search_chunks_numpy_impl(query_embedding, rows, top_k)
+    return _search_chunks_python_impl(query_embedding, rows, top_k)
+
+
+def _search_chunks_numpy_impl(q_vec: list, rows: list, top_k: int) -> list:
+    """numpy 批量余弦相似度搜索。"""
+    valid_rows = []
+    vectors = []
+    for row in rows:
+        try:
+            vec = json.loads(row["embedding"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        valid_rows.append(row)
+        vectors.append(vec)
+
+    if not valid_rows:
+        return []
+
+    q = np.array(q_vec, dtype=np.float64)
+    m = np.array(vectors, dtype=np.float64)
+
+    q_norm = np.linalg.norm(q)
+    m_norms = np.linalg.norm(m, axis=1)
+    if q_norm == 0 or np.all(m_norms == 0):
+        return []
+
+    dot_products = np.dot(m, q)
+    similarities = dot_products / (m_norms * q_norm)
+
+    results = []
+    for i, row in enumerate(valid_rows):
+        sim = float(similarities[i])
+        if sim > 0:
+            metadata = {}
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            results.append({
+                "chunk_id": row["id"],
+                "source_type": row["source_type"],
+                "source_id": row["source_id"],
+                "source_title": row["source_title"],
+                "content": row["content"],
+                "score": round(sim, 4),
+                "metadata": metadata,
+            })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:top_k]
+
+
+def _search_chunks_python_impl(q_vec: list, rows: list, top_k: int) -> list:
+    """纯 Python 余弦相似度搜索（少量数据时使用）。"""
+    results = []
+    for row in rows:
+        try:
+            vec = json.loads(row["embedding"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        sim = cosine_similarity(q_vec, vec)
+        if sim > 0:
+            metadata = {}
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            results.append({
+                "chunk_id": row["id"],
+                "source_type": row["source_type"],
+                "source_id": row["source_id"],
+                "source_title": row["source_title"],
+                "content": row["content"],
+                "score": round(sim, 4),
+                "metadata": metadata,
+            })
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:top_k]
+
+
+def delete_chunk_embeddings(source_type: str, source_id: int):
+    """删除指定来源的 chunk embeddings（清空 embedding 列）。"""
+    execute(
+        "UPDATE knowledge_chunks SET embedding = NULL WHERE source_type = ? AND source_id = ?",
+        (source_type, source_id),
+    )
+
+
+def clear_chunk_embeddings():
+    """清空所有 chunk embeddings。"""
+    execute("UPDATE knowledge_chunks SET embedding = NULL")
+
+
+def count_chunk_embeddings() -> int:
+    """统计已生成 embedding 的 chunk 数量。"""
+    row = fetch_one("SELECT COUNT(*) as cnt FROM knowledge_chunks WHERE embedding IS NOT NULL")
+    return row["cnt"] if row else 0

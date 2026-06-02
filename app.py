@@ -16,11 +16,14 @@ pages = {
     "日历视图": "pages.calendar_view",
     "时间轴": "pages.timeline",
     "AI问答": "pages.ai_query",
+    "RAG问答": "pages.rag_qa",
+    "业务大脑": "pages.business_brain",
     "文件上传": "pages.files",
     "每日总结": "pages.daily_summary",
     "项目管理": "pages.projects",
     "客户管理": "pages.clients",
     "数据管理": "pages.data_management",
+    "工作流监控": "pages.workflow_dashboard",
 }
 
 st.sidebar.title("AI办公助理")

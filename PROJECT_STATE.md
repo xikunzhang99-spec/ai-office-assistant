@@ -1,8 +1,8 @@
 # PROJECT_STATE.md — AI办公助理 项目交接文档
 
 > 最后更新: 2026-05-29
-> 当前阶段: Phase 15 长期记忆 + 关系图谱增强 + 主动工作流第一版 — 已完成
-> 项目状态: 10 个页面，15 张表，Obsidian 双向同步，飞书多轮上下文 + 确认式执行，长期记忆 + 关系图谱 + 主动建议
+> 当前阶段: Phase 16 Workflow Agent（工作流引擎）第一版 — 已完成
+> 项目状态: 10 个页面，17 张表，36 个服务文件，Obsidian 双向同步，飞书多轮上下文 + 确认式执行，长期记忆 + 关系图谱 + 主动建议 + 工作流引擎
 
 ---
 
@@ -120,6 +120,32 @@
 - 需跟进客户检测（30天无活动但有活跃项目）
 - AI 生成总结建议
 
+### 2.10 工作流引擎（Phase 16）🆕
+
+#### 项目阶段管理
+- **project_stages** 表 — 项目阶段追踪（active/completed/skipped/pending）
+- **workflow_templates** 表 — 4 套默认模板（software_project / client_followup / research_project / marketing_campaign），模板 JSON 含 stages + default_tasks
+- **workflow_engine.py** — 阶段初始化（幂等）、推进、跳过、推断、进度摘要、自动任务生成
+- 阶段流转：`advance_stage()` 完成当前阶段并激活下一个，`skip_stage()` 跳过但不自动激活
+
+#### 风险检测
+- **risk_detection_service.py** — 专用风险检测：项目（6维度：阶段缺失/逾期高优/停滞14天/阻塞/阶段卡住30天/标记风险）、客户（4维度：30天无跟进/所有项目停滞/逾期交付物/僵尸客户）、任务（3维度：逾期/阻塞/依赖风险）
+- 风险等级：high (逾期高优/停滞/阻塞/依赖逾期)、medium (阶段缺失/阶段卡住/无跟进)、low
+
+#### 统一编排
+- **workflow_agent_service.py** — `analyze_business_state()` 编排 risk_detection + proactive_suggestion + relation_service，返回综合健康度评分 + 风险汇总 + 项目/客户摘要 + AI 总览
+
+#### 页面增强
+- **Dashboard** — AI 建议区新增项目阶段分布进度条
+- **Project 详情页** — 阶段进度条 + 推进/跳过按钮 + 阶段卡片；新建项目自动初始化阶段
+
+#### 飞书新命令
+| 命令 | 说明 |
+|------|------|
+| `/项目状态 项目名` | 当前阶段、阶段流、进度%、剩余任务、风险 |
+| `/客户状态 客户名` | 客户概况、活跃项目阶段 |
+| `/项目风险 项目名` | 详细风险分析（高/中/低 + 建议） |
+
 ---
 
 ## 3. 核心技术栈
@@ -181,7 +207,7 @@ ai-office-assistant/
 │   ├── clients.py                # 客户管理（含长期记忆+跟进建议+风险）
 │   └── data_management.py        # 数据管理（统计+知识库+导出+清理+Obsidian+飞书）
 │
-├── services/                     # 业务逻辑层（33个文件）
+├── services/                     # 业务逻辑层（36个文件）
 │   ├── __init__.py
 │   ├── ai_service.py             # AI统一调用
 │   ├── backup_service.py         # 数据库备份
@@ -217,7 +243,11 @@ ai-office-assistant/
 │   ├── memory_service.py         # 长期记忆（AI提取+幂等+搜索+重建）
 │   ├── proactive_suggestion_service.py  # 主动工作流建议
 │   ├── document_action_service.py       # 文档动作分析
-│   └── relation_service.py       # 关系图谱增强
+│   ├── relation_service.py       # 关系图谱增强
+│   │
+│   ├── workflow_engine.py        # 工作流引擎（阶段管理+模板+自动任务）🆕
+│   ├── risk_detection_service.py # 风险检测（项目/客户/任务多维度）🆕
+│   └── workflow_agent_service.py # 统一编排入口（综合业务状态分析）🆕
 │
 ├── utils/
 │   ├── __init__.py
@@ -236,7 +266,7 @@ ai-office-assistant/
 
 ---
 
-## 5. 数据库表（15张）
+## 5. 数据库表（17张）
 
 | 表名 | 说明 | 关键字段 |
 |------|------|----------|
@@ -256,6 +286,8 @@ ai-office-assistant/
 | `obsidian_sync_logs` | Obsidian同步 | source_type+source_id (UNIQUE), content_hash, obsidian_path |
 | `memory_items` | 长期记忆 | memory_type, title, content, importance, client_id, project_id, task_id |
 | `feishu_sessions` | 飞书会话 | user_key (UNIQUE), current_mode, pending_actions_json, last_analysis_json, expires_at |
+| `project_stages` 🆕 | 项目阶段 | project_id, stage_name, stage_order, status, started_at, completed_at |
+| `workflow_templates` 🆕 | 工作流模板 | template_name, template_type, template_json |
 
 ---
 
@@ -292,6 +324,20 @@ ai-office-assistant/
 - 文件上传自动提取长期记忆
 - 17 个 DB 层测试 + 16 个集成测试全部通过
 
+### Phase 16: Workflow Agent（工作流引擎）第一版 ✅ 🆕
+- `project_stages` 表（阶段追踪：active/completed/skipped/pending）
+- `workflow_templates` 表（4套默认模板：software/client/research/marketing）
+- `workflow_engine.py`（阶段初始化/推进/跳过/推断/进度/自动任务生成）
+- `risk_detection_service.py`（项目6维度/客户4维度/任务3维度风险检测）
+- `workflow_agent_service.py`（统一编排 `analyze_business_state()`）
+- `proactive_suggestion_service.py` 增强（阶段缺失/卡住维度 + get_project_stage_summary）
+- Dashboard 项目阶段分布进度条
+- Project 详情页阶段可视化 + 推进/跳过按钮
+- 新建项目自动初始化阶段
+- 飞书命令 `/项目状态` `/客户状态` `/项目风险`
+- timeline_service 新增 4 个 event type（stage_*）
+- 全部逻辑幂等，所有操作记录 workflow_log
+
 ---
 
 ## 7. 当前存在的问题和 Bug
@@ -307,20 +353,25 @@ ai-office-assistant/
 
 ## 8. 下一阶段开发建议
 
-### 8.1 标签系统完善
+### 8.1 工作流引擎增强
+- 阶段自动推断：根据任务完成率和文件上传自动建议阶段推进
+- 工作流模板管理页面（CRUD 自定义模板）
+- 阶段 SLA 设置（预计完成时间 + 超时告警）
+
+### 8.2 标签系统完善
 - 标签管理页面
 - `tag_item` 动作一键执行
 - 按标签筛选实体
 
-### 8.2 向量检索升级
+### 8.3 向量检索升级
 - FAISS IVF/HNSW 索引（`faiss_search()` 接口已预留）
 
-### 8.3 UI/UX 改进
+### 8.4 UI/UX 改进
 - 暗色模式
 - 到期任务通知弹窗
 - 数据可视化图表（项目进度、任务趋势、时间热力图）
 
-### 8.4 基础设施升级（谨慎）
+### 8.5 基础设施升级（谨慎）
 - FastAPI 后端（替换 Streamlit 内置服务器）
 - PostgreSQL 迁移（多用户场景）
 

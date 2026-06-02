@@ -44,24 +44,43 @@ def _render_upload():
 
     if st.button("解析并总结", type="primary", key="btn_analyze"):
         with st.spinner("正在处理..."):
+            from services.workflow_service import WorkflowService
+
             filename = uploaded_file.name
             file_ext = os.path.splitext(filename)[1].lower()
+
+            # Start workflow run
+            wf_run = WorkflowService.start_run("file_processing", "file", None,
+                {"filename": filename, "file_type": file_ext, "source": "web"})
+            wf_run_id = wf_run["id"]
+            WorkflowService.complete_step(wf_run_id, "extract_file_info", f"{filename} ({file_ext})")
+            WorkflowService.complete_step(wf_run_id, "check_supported", f"格式: {file_ext}")
+            WorkflowService.complete_step(wf_run_id, "download_file", "web upload, skip download")
+            WorkflowService.complete_step(wf_run_id, "check_duplicate", "web upload, skip dedup")
 
             saved_path = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}")
             with open(saved_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
+            WorkflowService.complete_step(wf_run_id, "save_local", saved_path)
 
             content = parse_file(saved_path)
             if content.startswith("[文件解析失败]"):
+                WorkflowService.fail_step(wf_run_id, "parse_text", content)
                 st.error(content)
                 return
+            WorkflowService.complete_step(wf_run_id, "parse_text", f"{len(content)} chars")
 
             result = summarize_file(content, filename)
+            WorkflowService.complete_step(wf_run_id, "ai_summarize", f"summary={result.get('summary', '')[:80]}")
+            tags_str = ", ".join(result.get("tags", []))
+            WorkflowService.complete_step(wf_run_id, "ai_classify", f"tags={tags_str[:60]}")
+
             st.session_state["analysis_filename"] = filename
             st.session_state["analysis_file_ext"] = file_ext
             st.session_state["analysis_saved_path"] = saved_path
             st.session_state["analysis_result"] = result
             st.session_state["analysis_content"] = content
+            st.session_state["analysis_run_id"] = wf_run_id
             st.rerun()
 
     if "analysis_result" not in st.session_state:
@@ -115,6 +134,18 @@ def _render_upload():
             st.write(f"- {s}")
 
     if st.button("确认保存", type="primary", key="btn_save"):
+        from services.workflow_service import WorkflowService
+        from database.db import execute
+
+        wf_run_id = st.session_state.get("analysis_run_id")
+
+        # Complete match step
+        project_name = selected_project_name if selected_project_id else "None"
+        client_name = selected_client_name if selected_client_id else "None"
+        if wf_run_id:
+            WorkflowService.complete_step(wf_run_id, "match_relations",
+                f"client={client_name} project={project_name}")
+
         file_id = save_file_record(
             filename=filename,
             file_path=saved_path,
@@ -126,6 +157,10 @@ def _render_upload():
             project_id=selected_project_id or None,
             client_id=selected_client_id or None,
         )
+        if wf_run_id:
+            WorkflowService.complete_step(wf_run_id, "save_file_record", f"file_id={file_id}")
+            execute("UPDATE workflow_runs SET source_id = ? WHERE id = ?", (file_id, wf_run_id))
+
         add_event("file_uploaded", f"上传文件: {filename}", "", "file", file_id,
                   project_id=selected_project_id or None,
                   client_id=selected_client_id or None)
@@ -135,6 +170,23 @@ def _render_upload():
         if selected_client_id:
             add_relation("file", file_id, "client", selected_client_id, "belongs_to",
                          f"文件「{filename}」属于该客户")
+
+        # Generate preview (for workflow tracking)
+        preview_data = {
+            "title": filename,
+            "summary": result.get("summary", "")[:200],
+            "tags": [t.strip() for t in tags.split(",") if t.strip()],
+            "related_project": {"id": selected_project_id, "name": project_name} if selected_project_id else None,
+            "related_client": {"id": selected_client_id, "name": client_name} if selected_client_id else None,
+            "suggested_tasks": result.get("suggestions", []),
+            "key_points": result.get("key_points", []),
+            "pending_actions": [
+                "写入Obsidian文件摘要",
+                "提取长期记忆"
+            ]
+        }
+        if wf_run_id:
+            WorkflowService.complete_step(wf_run_id, "generate_preview", f"file_id={file_id}")
 
         md_content = generate_file_markdown(
             filename, file_ext, now_str(), tags,
@@ -150,8 +202,12 @@ def _render_upload():
             add_event("file_written_to_obsidian", f"Markdown写入Obsidian: {filename}",
                       md_path, "file", file_id)
             st.success(f"已写入 Obsidian: {md_path}")
+            if wf_run_id:
+                WorkflowService.complete_step(wf_run_id, "write_obsidian", f"synced: {filename}")
         else:
             st.warning("Obsidian 未配置，跳过写入")
+            if wf_run_id:
+                WorkflowService.complete_step(wf_run_id, "write_obsidian", "skipped: Obsidian not configured")
 
         st.success("文件处理完成！")
         st.markdown(md_content)
@@ -167,8 +223,22 @@ def _render_upload():
                 project_id=selected_project_id or None,
                 client_id=selected_client_id or None,
             )
+            if wf_run_id:
+                WorkflowService.complete_step(wf_run_id, "extract_memory", "done")
         except Exception:
-            pass
+            if wf_run_id:
+                WorkflowService.complete_step(wf_run_id, "extract_memory", "failed")
+
+        # Complete workflow run
+        if wf_run_id:
+            WorkflowService.complete_step(wf_run_id, "sync_knowledge", "skipped: web upload")
+            WorkflowService.complete_step(wf_run_id, "sync_embedding", "skipped: web upload")
+            WorkflowService.complete_step(wf_run_id, "build_reply", "web upload complete")
+            WorkflowService.complete_run(wf_run_id, {
+                "file_id": file_id, "filename": filename,
+                "summary": result.get("summary", "")[:100], "tags": tags,
+                "project": project_name, "client": client_name,
+            })
 
         # AI 任务建议
         st.divider()
@@ -177,6 +247,7 @@ def _render_upload():
 
         st.session_state.pop("analysis_result", None)
         st.session_state.pop("analysis_filename", None)
+        st.session_state.pop("analysis_run_id", None)
         st.session_state.pop("analysis_file_ext", None)
         st.session_state.pop("analysis_saved_path", None)
         st.session_state.pop("analysis_content", None)

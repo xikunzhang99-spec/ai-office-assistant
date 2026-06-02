@@ -392,3 +392,110 @@ def hybrid_search(question: str, limit: int = 10) -> list:
     from services.hybrid_search_service import hybrid_search as hs
     result = hs(question, limit=limit)
     return result["items"]
+
+
+# ── Chunk-based RAG (Phase 4: RAG + Semantic Search) ──
+
+def answer_with_chunks(question: str, top_k: int = 5) -> dict:
+    """基于 knowledge_chunks 的 RAG 问答。
+
+    流程：
+    1. 语义搜索相关 chunks
+    2. 构建 chunk 上下文
+    3. 调用 LLM 生成答案
+    4. 返回答案 + 来源
+
+    Returns:
+        {answer, sources, context, item_count, mode: "chunks"}
+    """
+    from services.search_service import semantic_search_chunks
+
+    chunks = semantic_search_chunks(question, top_k)
+
+    if not chunks:
+        answer = "资料不足，无法回答。知识库中没有找到相关信息，请先执行知识入库或尝试其他问法。"
+        add_event("ai_query", question, answer[:200], event_date=today_str())
+        return {
+            "answer": answer,
+            "sources": [],
+            "context": "",
+            "item_count": 0,
+            "mode": "chunks",
+            "cached": False,
+        }
+
+    context = _build_chunk_context(chunks)
+    answer = _generate_chunk_answer(question, context, len(chunks))
+
+    sources = []
+    for c in chunks:
+        meta = c.get("metadata", {})
+        sources.append({
+            "source_title": c.get("source_title", ""),
+            "source_type": c.get("source_type", ""),
+            "source_id": c.get("source_id", 0),
+            "date": meta.get("date", ""),
+            "chunk_id": c.get("chunk_id", 0),
+            "score": c.get("score", 0),
+        })
+
+    add_event("ai_query", question, answer[:200], event_date=today_str())
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "context": context,
+        "item_count": len(chunks),
+        "mode": "chunks",
+        "cached": False,
+    }
+
+
+def _build_chunk_context(chunks: list) -> str:
+    """构建 chunk 上下文文本，供 LLM 使用。"""
+    sections = []
+    seen_sources = set()
+
+    for i, c in enumerate(chunks):
+        source_key = (c.get("source_type", ""), c.get("source_id", 0))
+        source_title = c.get("source_title", "未知来源")
+        source_type = c.get("source_type", "")
+
+        type_label = TYPE_LABELS.get(source_type, source_type)
+        score = c.get("score", 0)
+
+        if source_key not in seen_sources:
+            sections.append(f"\n### [{type_label}] {source_title}")
+            seen_sources.add(source_key)
+
+        content = c.get("content", "")[:600]
+        sections.append(f"**[片段 {i+1}]** (相关度: {score:.2f})\n{content}")
+
+    return "\n".join(sections)
+
+
+def _generate_chunk_answer(question: str, context: str, item_count: int) -> str:
+    """基于 chunk 上下文生成 AI 回答。"""
+    prompt = f"""根据以下知识库检索结果回答用户的问题。用中文回答，简洁清晰，用Markdown格式。
+
+## 用户问题
+{question}
+
+## 知识库检索结果（共 {item_count} 个相关片段）
+{context}
+
+## 严格要求
+- 先给出一句总结，概括从知识库中找到多少相关信息
+- 列出关键信息，引用来源时标明来源标题和类型（如"来自 [项目] XXX"）
+- **只能基于上述检索结果回答，绝对不要编造不存在的信息**
+- **如果检索结果不足以回答问题的某个部分，请明确说明"当前资料不足，无法回答这部分"**
+- **不要猜测或假设知识库中没有的数据**
+- 不超过500字"""
+
+    return _chat(
+        prompt,
+        "You are a helpful office assistant. Answer questions based ONLY on the provided knowledge base context. "
+        "Always cite your sources. Never fabricate or assume information not present in the data.",
+        temperature=0.3,
+        max_tokens=1000,
+    )

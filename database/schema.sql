@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS workflow_logs (
     workflow_type TEXT NOT NULL,
     source_type TEXT,
     source_id INTEGER,
+    run_id INTEGER,
+    step_id INTEGER,
     status TEXT NOT NULL DEFAULT 'pending',
     message TEXT,
     details TEXT,
@@ -204,4 +206,49 @@ CREATE TABLE IF NOT EXISTS workflow_templates (
     description TEXT,
     template_json TEXT NOT NULL,
     created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_type TEXT NOT NULL,
+    source_type TEXT,
+    source_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'running',
+    trigger_info TEXT,
+    preview_json TEXT,
+    final_result_json TEXT,
+    error_step_name TEXT,
+    error_message TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    step_name TEXT NOT NULL,
+    step_order INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    input_summary TEXT,
+    output_summary TEXT,
+    error_message TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT,
+    UNIQUE(run_id, step_name)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT NOT NULL,
+    source_id INTEGER NOT NULL,
+    source_title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT,
+    embedding TEXT,
+    created_at TEXT,
+    updated_at TEXT
 );

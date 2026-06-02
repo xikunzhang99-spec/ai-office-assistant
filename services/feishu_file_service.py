@@ -167,6 +167,12 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         {reply_text, action, success}
     """
     from services.workflow_log_service import add_workflow_log
+    from services.workflow_service import WorkflowService
+
+    # Start workflow run
+    run = WorkflowService.start_run("file_processing", "feishu", None,
+        {"filename": "unknown", "source": "feishu"})
+    run_id = run["id"]
 
     # ── 调试 ──
     msg = message_event.get("message", {})
@@ -188,32 +194,49 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
     file_type = info["file_type"]
     msg_id = message_id or info.get("message_id", "")
 
+    # Update run trigger_info with actual filename
+    from database.db import execute
+    import json as _json
+    execute(
+        "UPDATE workflow_runs SET trigger_info = ? WHERE id = ?",
+        (_json.dumps({"filename": file_name, "file_type": file_type, "source": "feishu"},
+                     ensure_ascii=False), run_id),
+    )
+
     if not file_key:
-        add_workflow_log("feishu_file_error", "feishu", None, "error", "缺少 file_key")
+        add_workflow_log("feishu_file_error", "feishu", None, "error", "缺少 file_key", run_id=run_id)
+        WorkflowService.fail_step(run_id, "extract_file_info", "缺少 file_key")
         return {"reply_text": "文件信息不完整，无法处理。", "action": "file_error", "success": False}
 
     if not _is_supported(file_type):
-        add_workflow_log("feishu_file_error", "feishu", None, "error", f"不支持格式: {file_type}")
+        add_workflow_log("feishu_file_error", "feishu", None, "error", f"不支持格式: {file_type}", run_id=run_id)
+        WorkflowService.fail_step(run_id, "check_supported", f"不支持格式: {file_type}")
         return {"reply_text": f"暂不支持 {file_type} 格式。\n支持: {', '.join(sorted(SUPPORTED_TYPES))}",
                 "action": "file_unsupported", "success": True}
+    WorkflowService.complete_step(run_id, "extract_file_info", f"file_key={file_key[:20]}...")
+    WorkflowService.complete_step(run_id, "check_supported", f"格式: {file_type}")
 
     # ── Step 2: 下载 ──
     dl_result = download_feishu_file(msg_id, file_key, file_name)
     if not dl_result["success"]:
         add_workflow_log("file_download_failed", "feishu", None, "error",
-                         f"{file_name}: {dl_result['error']}")
+                         f"{file_name}: {dl_result['error']}", run_id=run_id)
+        WorkflowService.fail_step(run_id, "download_file", dl_result["error"])
         return {"reply_text": f"文件下载失败\n\n{dl_result['error']}",
                 "action": "file_download_error", "success": False}
     file_bytes = dl_result["content"]
     add_workflow_log("file_download_success", "feishu", None, "success",
-                     f"{file_name} ({len(file_bytes)} bytes)")
+                     f"{file_name} ({len(file_bytes)} bytes)", run_id=run_id)
+    WorkflowService.complete_step(run_id, "download_file", f"{len(file_bytes)} bytes")
 
     # ── Step 3: 去重 ──
     file_hash = _compute_file_hash(file_bytes)
     existing = get_file_by_hash(file_hash)
     if existing:
         add_workflow_log("file_dedup_skipped", "file", existing["id"], "success",
-                         f"重复文件: {file_name} hash={file_hash[:16]}")
+                         f"重复文件: {file_name} hash={file_hash[:16]}", run_id=run_id)
+        WorkflowService.complete_step(run_id, "check_duplicate", "重复文件，已跳过")
+        WorkflowService.complete_run(run_id, {"action": "file_duplicate", "existing_file_id": existing["id"]})
 
         from services.file_service import generate_task_suggestions_from_file
         dup_suggestions = generate_task_suggestions_from_file(existing["id"])
@@ -240,11 +263,13 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
                 reply += f"\n  {i+1}. {a['title']}"
             reply += "\n\n回复「执行N」即可创建对应任务"
         return {"reply_text": reply, "action": "file_duplicate", "success": True}
+    WorkflowService.complete_step(run_id, "check_duplicate", "新文件，继续处理")
 
     # ── Step 4: 保存到本地 ──
     base, ext = os.path.splitext(file_name)
     unique_name = f"{base}_{file_hash[:8]}{ext}"
     file_path = save_feishu_file_to_uploads(file_bytes, unique_name)
+    WorkflowService.complete_step(run_id, "save_local", file_path)
 
     # ── Step 5: 解析文本 ──
     try:
@@ -252,11 +277,13 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         text_content = parse_file(file_path)
     except Exception as e:
         add_workflow_log("file_parse_failed", "feishu", None, "error",
-                         f"{file_name}: {str(e)}")
+                         f"{file_name}: {str(e)}", run_id=run_id)
+        WorkflowService.fail_step(run_id, "parse_text", str(e))
         return {"reply_text": f"文件「{file_name}」解析失败：{str(e)[:200]}",
                 "action": "file_parse_error", "success": False}
     add_workflow_log("file_parse_success", "feishu", None, "success",
-                     f"{file_name} ({len(text_content)} chars)")
+                     f"{file_name} ({len(text_content)} chars)", run_id=run_id)
+    WorkflowService.complete_step(run_id, "parse_text", f"{len(text_content)} chars")
 
     # ── Step 6: AI 分析 ──
     try:
@@ -264,7 +291,8 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         analysis = summarize_file(text_content[:6000], file_name)
     except Exception as e:
         add_workflow_log("file_summary_failed", "feishu", None, "error",
-                         f"{file_name}: {str(e)}")
+                         f"{file_name}: {str(e)}", run_id=run_id)
+        WorkflowService.fail_step(run_id, "ai_summarize", str(e))
         return {"reply_text": f"AI 分析失败：{str(e)[:200]}",
                 "action": "file_analysis_error", "success": False}
 
@@ -274,10 +302,14 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
     tags_str = ", ".join(tags) if tags else ""
     suggestions = analysis.get("suggestions", [])[:5]
     add_workflow_log("file_summary_success", "feishu", None, "success",
-                     f"{file_name} summary={summary[:80]} tags={tags_str[:60]}")
+                     f"{file_name} summary={summary[:80]} tags={tags_str[:60]}", run_id=run_id)
+    WorkflowService.complete_step(run_id, "ai_summarize", f"summary={summary[:80]}")
+    WorkflowService.complete_step(run_id, "ai_classify", f"tags={tags_str[:60]}")
 
     # ── Step 7: 匹配客户/项目 ──
     matched = match_related_client_project(file_name, text_content)
+    WorkflowService.complete_step(run_id, "match_relations",
+        f"client={matched.get('client_name', 'None')} project={matched.get('project_name', 'None')}")
 
     # ── Step 8: 保存 files 记录 ──
     from services.file_service import save_file_record
@@ -288,6 +320,10 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         project_id=matched["project_id"], client_id=matched["client_id"],
         file_hash=file_hash,
     )
+    WorkflowService.complete_step(run_id, "save_file_record", f"file_id={file_id}")
+    # Update run source_id
+    execute("UPDATE workflow_runs SET source_id = ? WHERE id = ?", (file_id, run_id))
+    WorkflowService.complete_step(run_id, "generate_preview", f"file_id={file_id}")
 
     # ── Step 9: timeline_event + relations ──
     try:
@@ -300,17 +336,17 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
                   tags=tags_str)
     except Exception:
         pass
-    # relations: file→client, file→project 已在 save_file_record 内部通过
-    # 调用方的 client_id/project_id 自动触发 add_relation
 
     # ── Step 10: knowledge_items ──
     try:
         from services.knowledge_service import sync_file_to_knowledge
         ki_id = sync_file_to_knowledge(file_id)
         add_workflow_log("file_sync_knowledge_success", "file", file_id, "success",
-                         f"KI id={ki_id}")
+                         f"KI id={ki_id}", run_id=run_id)
+        WorkflowService.complete_step(run_id, "sync_knowledge", f"KI id={ki_id}")
     except Exception as e:
-        add_workflow_log("file_sync_knowledge_failed", "file", file_id, "error", str(e))
+        add_workflow_log("file_sync_knowledge_failed", "file", file_id, "error", str(e), run_id=run_id)
+        WorkflowService.complete_step(run_id, "sync_knowledge", f"Error: {str(e)[:80]}")
 
     # ── Step 11: Embedding ──
     try:
@@ -321,10 +357,12 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
             for item in items:
                 if item.get("source_id") == file_id:
                     upsert_embedding(item["id"])
-                    add_workflow_log("file_embedding_success", "file", file_id, "success", "")
+                    add_workflow_log("file_embedding_success", "file", file_id, "success", "", run_id=run_id)
                     break
+        WorkflowService.complete_step(run_id, "sync_embedding", "done")
     except Exception as e:
-        add_workflow_log("file_embedding_failed", "file", file_id, "error", str(e))
+        add_workflow_log("file_embedding_failed", "file", file_id, "error", str(e), run_id=run_id)
+        WorkflowService.complete_step(run_id, "sync_embedding", f"Error: {str(e)[:80]}")
 
     # ── Step 12: Obsidian 同步 ──
     try:
@@ -334,16 +372,20 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
             try:
                 sync_file_to_obsidian(file_id)
                 add_workflow_log("obsidian_sync_success", "file", file_id, "success",
-                                 f"飞书文件 Obsidian 同步: {file_name}")
+                                 f"飞书文件 Obsidian 同步: {file_name}", run_id=run_id)
+                WorkflowService.complete_step(run_id, "write_obsidian", f"synced: {file_name}")
             except Exception:
                 add_workflow_log("obsidian_sync_failed", "file", file_id, "error",
-                                 f"飞书文件 Obsidian 同步失败: {file_name}")
+                                 f"飞书文件 Obsidian 同步失败: {file_name}", run_id=run_id)
+                WorkflowService.complete_step(run_id, "write_obsidian", "sync failed")
         else:
             add_workflow_log("obsidian_sync_skipped", "file", file_id, "success",
-                             "Obsidian 未配置")
+                             "Obsidian 未配置", run_id=run_id)
+            WorkflowService.complete_step(run_id, "write_obsidian", "skipped: Obsidian not configured")
     except Exception:
         add_workflow_log("obsidian_sync_skipped", "file", file_id, "success",
-                         "Obsidian 未配置")
+                         "Obsidian 未配置", run_id=run_id)
+        WorkflowService.complete_step(run_id, "write_obsidian", "skipped")
 
     # ── Step 13: 任务建议 ──
     pending_actions = []
@@ -401,10 +443,10 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
             except Exception:
                 pass
         add_workflow_log("document_action_analysis", "file", file_id, "success",
-                         f"文档动作建议: {len(doc_actions)} 条")
+                         f"文档动作建议: {len(doc_actions)} 条", run_id=run_id)
     except Exception as e:
         add_workflow_log("document_action_analysis", "file", file_id, "error",
-                         f"文档动作分析失败: {str(e)[:200]}")
+                         f"文档动作分析失败: {str(e)[:200]}", run_id=run_id)
 
     # ── Step 15: 提取长期记忆 ──
     try:
@@ -416,19 +458,28 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         )
         if mem_count > 0:
             add_workflow_log("file_memory_extraction", "file", file_id, "success",
-                           f"从文件提取 {mem_count} 条长期记忆")
+                           f"从文件提取 {mem_count} 条长期记忆", run_id=run_id)
+        WorkflowService.complete_step(run_id, "extract_memory", f"{mem_count} memories extracted")
     except Exception as e:
         add_workflow_log("file_memory_extraction", "file", file_id, "error",
-                       f"记忆提取失败: {str(e)[:200]}")
-    # ── Step 16: 完成日志 ──
+                       f"记忆提取失败: {str(e)[:200]}", run_id=run_id)
+        WorkflowService.complete_step(run_id, "extract_memory", f"Error: {str(e)[:80]}")
+
+    # ── Step 16: 构建回复 ──
+    reply = _build_file_reply(file_name, file_type, summary, key_points, tags,
+                              matched, pending_actions, doc_actions)
+    WorkflowService.complete_step(run_id, "build_reply", f"reply length: {len(reply)}")
+
+    # ── 完成日志 ──
     add_workflow_log("feishu_file_processed", "file", file_id, "success",
                      f"飞书文件处理完成: {file_name} | summary={summary[:80]} "
                      f"| project={matched['project_name']} | client={matched['client_name']} "
-                     f"| tags={tags_str[:60]}")
-
-    # ── Step 17: 构建回复 ──
-    reply = _build_file_reply(file_name, file_type, summary, key_points, tags,
-                              matched, pending_actions, doc_actions)
+                     f"| tags={tags_str[:60]}", run_id=run_id)
+    WorkflowService.complete_run(run_id, {
+        "file_id": file_id, "filename": file_name,
+        "summary": summary[:100], "tags": tags_str,
+        "project": matched["project_name"], "client": matched["client_name"],
+    })
 
     return {"reply_text": reply, "action": "file_processed", "success": True}
 

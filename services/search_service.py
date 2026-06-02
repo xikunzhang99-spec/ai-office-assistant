@@ -165,3 +165,29 @@ def build_context(results, project_map=None, client_map=None):
         return "没有找到相关数据。"
 
     return "\n\n".join(sections)
+
+
+# ── Chunk-level Semantic Search (Phase 4: RAG + Semantic Search) ──
+
+def semantic_search_chunks(query: str, top_k: int = 5) -> list[dict]:
+    """对 knowledge_chunks 进行语义搜索。
+
+    流程：
+    1. 对 query 生成 embedding
+    2. 在 knowledge_chunks 中搜索相似 chunks（numpy/FISS）
+    3. 返回 chunk 详情 + metadata
+
+    Args:
+        query: 查询文本
+        top_k: 返回结果数量
+
+    Returns:
+        [{chunk_id, source_type, source_title, source_id, content, score, metadata}, ...]
+    """
+    from services.embedding_service import get_embedding, search_chunks_numpy
+
+    q_vec = get_embedding(query)
+    if not q_vec:
+        return []
+
+    return search_chunks_numpy(q_vec, top_k)

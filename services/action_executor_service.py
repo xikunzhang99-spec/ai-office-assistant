@@ -81,6 +81,12 @@ def execute_action(action: dict, context_sources: list = None) -> dict:
             return _execute_generate_summary(title, description)
         elif action_type == "tag_item":
             return _execute_tag_item(action)
+        elif action_type == "create_note":
+            return _execute_create_note(title, description)
+        elif action_type == "update_project":
+            return _execute_update_project(title, description, related_project_id, action)
+        elif action_type == "update_client":
+            return _execute_update_client(title, description, related_client_id, action)
         elif action_type == "no_action":
             return {"success": True, "message": "无需操作", "result_id": None}
         else:
@@ -249,6 +255,60 @@ def _execute_tag_item(action):
     msg = "标签功能暂不支持自动执行"
     _log_action("tag_item", None, "error", msg, action)
     return {"success": False, "message": msg, "result_id": None}
+
+
+def _execute_create_note(title, description):
+    """创建随手记/笔记。"""
+    from services.summary_service import create_daily_note
+    content = f"{title}\n\n{description}" if description else title
+    note_id = create_daily_note(content)
+    msg = f"笔记「{title}」已保存"
+    _log_action("create_note", note_id, "success", msg, {"title": title, "note_id": note_id})
+    return {"success": True, "message": msg, "result_id": note_id}
+
+
+def _execute_update_project(title, description, project_id, action=None):
+    """更新项目状态并记录时间轴事件。"""
+    from services.timeline_service import add_event
+
+    event_id = None
+    if project_id:
+        try:
+            from services.project_service import update_project
+            status = (action or {}).get("params", {}).get("status", "")
+            if status:
+                update_project(project_id, status=status)
+        except Exception:
+            pass
+
+        event_id = add_event(
+            event_type="project_update",
+            title=title,
+            description=description,
+            project_id=project_id,
+        )
+
+    msg = f"项目更新「{title}」已记录"
+    _log_action("update_project", event_id, "success", msg,
+                {"title": title, "project_id": project_id, "event_id": event_id})
+    return {"success": True, "message": msg, "result_id": event_id}
+
+
+def _execute_update_client(title, description, client_id, action=None):
+    """更新客户跟进记录，写入时间轴。"""
+    from services.timeline_service import add_event
+
+    event_id = add_event(
+        event_type="client_followup",
+        title=title,
+        description=description,
+        client_id=client_id,
+    )
+
+    msg = f"客户跟进「{title}」已记录"
+    _log_action("update_client", event_id, "success", msg,
+                {"title": title, "client_id": client_id, "event_id": event_id})
+    return {"success": True, "message": msg, "result_id": event_id}
 
 
 def _log_action(action_type, result_id, status, message, action):

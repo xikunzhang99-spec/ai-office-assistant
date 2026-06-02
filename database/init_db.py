@@ -123,6 +123,52 @@ MIGRATIONS = [
         template_json TEXT NOT NULL,
         created_at TEXT
     )""",
+    # Workflow Agent v2: Run/Step tracking
+    """CREATE TABLE IF NOT EXISTS workflow_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_type TEXT NOT NULL,
+        source_type TEXT,
+        source_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'running',
+        trigger_info TEXT,
+        preview_json TEXT,
+        final_result_json TEXT,
+        error_step_name TEXT,
+        error_message TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS workflow_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        step_name TEXT NOT NULL,
+        step_order INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        input_summary TEXT,
+        output_summary TEXT,
+        error_message TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT,
+        UNIQUE(run_id, step_name)
+    )""",
+    "ALTER TABLE workflow_logs ADD COLUMN run_id INTEGER",
+    "ALTER TABLE workflow_logs ADD COLUMN step_id INTEGER",
+    # Phase 4: RAG chunk-level knowledge
+    "ALTER TABLE knowledge_chunks ADD COLUMN embedding TEXT",
+    """CREATE TABLE IF NOT EXISTS knowledge_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_type TEXT NOT NULL,
+        source_id INTEGER NOT NULL,
+        source_title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )""",
 ]
 
 

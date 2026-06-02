@@ -95,8 +95,33 @@ def handle_feishu_text_message(user_text: str, message_id: str = None, sender_id
     text = (user_text or "").strip()
     sid = sender_id or "default"
 
+    # ── 启动工作流追踪 ──
+    try:
+        from services.workflow_service import WorkflowService
+        wf_run = WorkflowService.start_run("feishu_message", "feishu", None,
+            {"text": text[:200], "sender_id": sid})
+        wf_run_id = wf_run["id"]
+    except Exception:
+        wf_run_id = None
+
+    def _wf_complete_step(step_name, output=""):
+        if wf_run_id:
+            try:
+                WorkflowService.complete_step(wf_run_id, step_name, output)
+            except Exception:
+                pass
+
+    def _wf_complete_run(result=None):
+        if wf_run_id:
+            try:
+                WorkflowService.complete_run(wf_run_id, result)
+            except Exception:
+                pass
+
     # 空消息
     if not text:
+        _wf_complete_step("detect_intent", "empty message")
+        _wf_complete_run({"action": "empty"})
         return {"reply_text": "请输入问题，或发送 /帮助 查看命令。", "action": "empty", "success": True}
 
     # ── 确保 session 存在 ──
@@ -109,45 +134,99 @@ def handle_feishu_text_message(user_text: str, message_id: str = None, sender_id
     # ── 会话上下文意图检测（优先于具体命令）──
     intent_result = _detect_session_intent(text, sid)
     if intent_result:
+        _wf_complete_step("detect_intent", f"session_intent: {intent_result.get('action', 'unknown')}")
+        _wf_complete_step("route_command", "session_intent")
+        _wf_complete_step("execute_action", str(intent_result.get('success', False)))
+        _wf_complete_step("build_reply", str(intent_result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": intent_result.get("action")})
         return intent_result
+
+    # ── 意图检测（内容类型识别）──
+    intent_type = "unknown"
+    try:
+        from services.ai_service import detect_content_intent
+        intent_result = detect_content_intent(text)
+        intent_type = intent_result.get("intent_type", "unknown")
+    except Exception:
+        pass
+    _wf_complete_step("detect_intent", f"content_type={intent_type}")
 
     # ── 执行全部建议动作 ──
     if re.match(r'^执行全部$', text):
-        return _cmd_execute_all(sid)
+        _wf_complete_step("route_command", "execute_all")
+        result = _cmd_execute_all(sid)
+        _wf_complete_step("execute_action", str(result.get('success', False)))
+        _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": result.get("action")})
+        return result
 
     # ── 执行建议动作（单条）──
     exec_match = re.match(r'^执行\s*(\d+)$', text)
     if exec_match:
+        _wf_complete_step("route_command", "execute_single")
         idx = int(exec_match.group(1)) - 1
-        return _cmd_execute_action(sid, idx)
+        result = _cmd_execute_action(sid, idx)
+        _wf_complete_step("execute_action", str(result.get('success', False)))
+        _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": result.get("action")})
+        return result
 
     # ── 文档选段命令（优先匹配更具体的模式）──
     section_match = re.match(r'^把第?\s*(\d+)\s*部分?创建成(项目|任务|时间轴)', text)
     section_all_match = re.match(r'^把(.+?)全部创建成(任务)', text)
     section_kw_match = re.match(r'^把(.+?)部分?(?:写入|创建成)(时间轴|项目|任务)?', text)
     if section_match:
+        _wf_complete_step("route_command", "document_section")
         idx = int(section_match.group(1)) - 1
         target = section_match.group(2)
-        return _handle_document_section_command(sid, section_index=idx, target_type=target)
+        result = _handle_document_section_command(sid, section_index=idx, target_type=target)
+        _wf_complete_step("execute_action", str(result.get('success', False)))
+        _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": result.get("action")})
+        return result
     elif section_all_match:
+        _wf_complete_step("route_command", "document_section_all")
         kw = section_all_match.group(1).strip()
-        return _handle_document_section_command(sid, keyword=kw, create_all_tasks=True)
+        result = _handle_document_section_command(sid, keyword=kw, create_all_tasks=True)
+        _wf_complete_step("execute_action", str(result.get('success', False)))
+        _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": result.get("action")})
+        return result
     elif section_kw_match:
+        _wf_complete_step("route_command", "document_section_kw")
         kw = section_kw_match.group(1).strip()
         target = section_kw_match.group(2) or "时间轴"
-        return _handle_document_section_command(sid, keyword=kw, target_type=target)
+        result = _handle_document_section_command(sid, keyword=kw, target_type=target)
+        _wf_complete_step("execute_action", str(result.get('success', False)))
+        _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": result.get("action")})
+        return result
 
     # ── 上下文指代（它/这个/刚才/上面的）──
     context_result = _handle_context_reference(text, sid)
     if context_result:
+        _wf_complete_step("route_command", "context_reference")
+        _wf_complete_step("execute_action", str(context_result.get('success', False)))
+        _wf_complete_step("build_reply", str(context_result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": context_result.get("action")})
         return context_result
 
     # ── 命令路由 ──
     if text.startswith("/"):
-        return _handle_command(text, message_id, sid)
+        _wf_complete_step("route_command", f"command: {text.split()[0] if text.split() else text}")
+        result = _handle_command(text, message_id, sid)
+        _wf_complete_step("execute_action", str(result.get('success', False)))
+        _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+        _wf_complete_run({"action": result.get("action")})
+        return result
 
     # ── 默认：AI 问答 ──
-    return _handle_ai_qa(text, message_id, sid)
+    _wf_complete_step("route_command", "ai_qa")
+    result = _handle_ai_qa(text, message_id, sid)
+    _wf_complete_step("ai_qa", str(result.get('success', False)))
+    _wf_complete_step("build_reply", str(result.get('reply_text', ''))[:80])
+    _wf_complete_run({"action": result.get("action")})
+    return result
 
 
 def _handle_command(text: str, message_id: str = None, sender_id: str = None) -> dict:

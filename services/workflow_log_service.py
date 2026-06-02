@@ -13,13 +13,15 @@ def add_workflow_log(
     status: str = "success",
     message: str = "",
     details: str = "",
+    run_id: int = None,
+    step_id: int = None,
 ) -> int:
     """记录一条工作流执行日志。"""
     return insert(
         """INSERT INTO workflow_logs
-           (workflow_type, source_type, source_id, status, message, details, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (workflow_type, source_type, source_id, status, message, details, now_str()),
+           (workflow_type, source_type, source_id, run_id, step_id, status, message, details, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (workflow_type, source_type, source_id, run_id, step_id, status, message, details, now_str()),
     )
 
 
