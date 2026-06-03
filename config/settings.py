@@ -27,6 +27,13 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID")
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET")
 
+# Feishu Reply Optimization
+FEISHU_REPLY_STYLE = os.getenv("FEISHU_REPLY_STYLE", "concise")
+FEISHU_REPLY_MAX_ITEMS = int(os.getenv("FEISHU_REPLY_MAX_ITEMS", "5"))
+FEISHU_REPLY_MAX_SUMMARY_LENGTH = int(os.getenv("FEISHU_REPLY_MAX_SUMMARY_LENGTH", "120"))
+FEISHU_ENABLE_EMOJI = os.getenv("FEISHU_ENABLE_EMOJI", "true").lower() == "true"
+FEISHU_SHOW_DEBUG = os.getenv("FEISHU_SHOW_DEBUG", "false").lower() == "true"
+
 # API
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", 8000))

@@ -165,7 +165,8 @@ async def feishu_webhook(request: Request):
         from services.feishu_file_service import handle_feishu_file_message
         result = handle_feishu_file_message(event, message_id, open_id)
     elif msg_type == "image":
-        result = {"reply_text": "暂不支持图片消息，请发送文本或文件。",
+        from services.feishu.reply_formatter import format_error
+        result = {"reply_text": format_error("暂不支持图片消息", "请发送文本或文件"),
                   "action": "image_unsupported", "success": True}
     else:
         from services.feishu_message_service import handle_feishu_text_message

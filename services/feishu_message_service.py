@@ -10,6 +10,18 @@ from utils.date_utils import today_str
 MAX_REPLY_LENGTH = 1000
 MAX_SOURCES = 3
 
+
+def _fe(reason, suggestion=""):
+    """快捷格式化错误回复。"""
+    from services.feishu.reply_formatter import format_error
+    return format_error(reason, suggestion)
+
+
+def _fs(result):
+    """快捷格式化成功回复。"""
+    from services.feishu.reply_formatter import format_success
+    return format_success(result)
+
 # AI 建议暂存（open_id → actions list）— 内存 fallback
 PENDING_ACTIONS = {}
 
@@ -55,33 +67,7 @@ def _get_doc_context_from_session(sender_id: str) -> dict | None:
         pass
     return FEISHU_DOCUMENT_CONTEXTS.get(sender_id)
 
-COMMANDS_HELP = """📋 **AI 办公助理命令**
-
-**查询**
-/任务 今天 — 今日到期任务
-/任务 逾期 — 逾期任务
-/任务 未来3天 — 未来3天到期任务
-/总结 今天 — 今日工作简报
-/问 xxx — AI 查询
-
-**创建**
-/新客户 名称 联系人:xx 电话:xx 备注:xx
-/新项目 名称 客户:xx 状态:进行中
-/新任务 标题 项目:xx 客户:xx 截止:明天 优先级:高
-
-**主动建议**
-/今日建议 — 今日重点任务、逾期、风险、跟进建议
-/客户建议 客户名 — 该客户的风险、跟进、动态
-/项目建议 项目名 — 该项目的风险、下一步建议
-
-**工作流状态**
-/项目状态 项目名 — 查看项目阶段、进度、剩余任务、风险
-/客户状态 客户名 — 查看客户概况、活跃项目阶段
-/项目风险 项目名 — 查看项目详细风险分析
-
-**执行**
-直接发问题 → AI 回答 + 建议
-回复 执行1 / 执行2 → 执行建议动作"""
+COMMANDS_HELP = None  # 由 _cmd_help 通过 format_help() 生成
 
 
 def handle_feishu_text_message(user_text: str, message_id: str = None, sender_id: str = None) -> dict:
@@ -290,7 +276,8 @@ def _handle_command(text: str, message_id: str = None, sender_id: str = None) ->
 # ── 查询命令 ──
 
 def _cmd_help() -> dict:
-    return {"reply_text": COMMANDS_HELP, "action": "help", "success": True}
+    from services.feishu.reply_formatter import format_help
+    return {"reply_text": format_help(), "action": "help", "success": True}
 
 
 def _cmd_tasks(arg: str) -> dict:
@@ -375,7 +362,7 @@ def _cmd_create_client(arg: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_create_client", "client", None, "error", str(e))
-        return {"reply_text": f"创建客户失败：{str(e)[:200]}", "action": "create_client_error", "success": False}
+        return {"reply_text": _fe("创建客户失败"), "action": "create_client_error", "success": False}
 
 
 def _cmd_create_project(arg: str) -> dict:
@@ -423,7 +410,7 @@ def _cmd_create_project(arg: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_create_project", "project", None, "error", str(e))
-        return {"reply_text": f"创建项目失败：{str(e)[:200]}", "action": "create_project_error", "success": False}
+        return {"reply_text": _fe("创建项目失败"), "action": "create_project_error", "success": False}
 
 
 def _cmd_create_task(arg: str) -> dict:
@@ -501,7 +488,7 @@ def _cmd_create_task(arg: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_create_task", "task", None, "error", str(e))
-        return {"reply_text": f"创建任务失败：{str(e)[:200]}", "action": "create_task_error", "success": False}
+        return {"reply_text": _fe("创建任务失败"), "action": "create_task_error", "success": False}
 
 
 # ── AI 建议执行 ──
@@ -534,11 +521,11 @@ def _cmd_execute_action(sender_id: str, idx: int) -> dict:
         else:
             add_workflow_log("feishu_execute_action", "ai_suggestion", None, "error",
                              f"执行建议 #{idx+1} 失败: {result['message']}")
-            return {"reply_text": f"执行失败：{result['message']}", "action": "execute_action_error", "success": False}
+            return {"reply_text": _fe("执行失败"), "action": "execute_action_error", "success": False}
 
     except Exception as e:
         add_workflow_log("feishu_execute_action", "ai_suggestion", None, "error", str(e))
-        return {"reply_text": f"执行异常：{str(e)[:200]}", "action": "execute_action_error", "success": False}
+        return {"reply_text": _fe("执行异常"), "action": "execute_action_error", "success": False}
 
 
 # ── 执行全部 ──
@@ -554,7 +541,7 @@ def _cmd_execute_all(sender_id: str) -> dict:
 
     success_count = 0
     fail_count = 0
-    lines = ["📋 **批量执行结果：**", ""]
+    lines = ["📋 批量执行结果：", ""]
 
     for i, action in enumerate(actions):
         try:
@@ -588,7 +575,7 @@ def _cmd_daily_suggestions() -> dict:
         from services.proactive_suggestion_service import generate_daily_suggestions
         s = generate_daily_suggestions()
 
-        lines = ["📋 **今日工作建议**", ""]
+        lines = ["📋 今日工作建议", ""]
 
         # AI 总结
         if s.get("summary"):
@@ -597,7 +584,7 @@ def _cmd_daily_suggestions() -> dict:
 
         # 逾期事项
         if s["overdue_items"]:
-            lines.append(f"⚠️ **逾期事项 ({len(s['overdue_items'])})**")
+            lines.append(f"⚠️ 逾期事项 ({len(s['overdue_items'])})")
             for t in s["overdue_items"][:5]:
                 p_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(t["priority"], "")
                 lines.append(f"  {p_emoji} {t['title']} — {t.get('due_date', '')}")
@@ -605,14 +592,14 @@ def _cmd_daily_suggestions() -> dict:
 
         # 今日重点
         if s["priority_tasks"]:
-            lines.append(f"🔴 **今日高优先级任务 ({len(s['priority_tasks'])})**")
+            lines.append(f"🔴 今日高优先级任务 ({len(s['priority_tasks'])})")
             for t in s["priority_tasks"][:5]:
                 lines.append(f"  - {t['title']}")
             lines.append("")
 
         # 需跟进客户
         if s["clients_to_follow"]:
-            lines.append(f"📞 **需跟进客户 ({len(s['clients_to_follow'])})**")
+            lines.append(f"📞 需跟进客户 ({len(s['clients_to_follow'])})")
             for c in s["clients_to_follow"][:3]:
                 proj_count = c.get("active_projects", 0)
                 lines.append(f"  - {c['name']}（{proj_count} 个活跃项目）")
@@ -620,7 +607,7 @@ def _cmd_daily_suggestions() -> dict:
 
         # 项目风险
         if s["project_risks"]:
-            lines.append(f"🚨 **项目风险 ({len(s['project_risks'])})**")
+            lines.append(f"🚨 项目风险 ({len(s['project_risks'])})")
             for r in s["project_risks"][:3]:
                 client_info = f"[{r.get('client_name', '')}] " if r.get("client_name") else ""
                 lines.append(f"  - {client_info}{r['name']}: {r.get('description', '')}")
@@ -628,7 +615,7 @@ def _cmd_daily_suggestions() -> dict:
 
         # 未执行建议
         if s["pending_document_actions"]:
-            lines.append(f"📄 **未执行文件建议 ({len(s['pending_document_actions'])})**")
+            lines.append(f"📄 未执行文件建议 ({len(s['pending_document_actions'])})")
             lines.append("  回复「上传文件」查看详情")
 
         if not any([s["priority_tasks"], s["overdue_items"], s["clients_to_follow"],
@@ -641,7 +628,7 @@ def _cmd_daily_suggestions() -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_daily_suggestions", "feishu", None, "error", str(e))
-        return {"reply_text": f"生成建议失败：{str(e)[:200]}",
+        return {"reply_text": _fe("生成建议失败"),
                 "action": "daily_suggestions_error", "success": False}
 
 
@@ -663,26 +650,26 @@ def _cmd_client_suggestions(arg: str) -> dict:
         s = generate_client_suggestions(clients[0]["id"])
 
         c = s["client"]
-        lines = [f"📋 **{c['name']} — 跟进建议**", ""]
+        lines = [f"📋 {c['name']} — 跟进建议", ""]
 
         if s.get("suggestions"):
             lines.append(f"💡 {s['suggestions']}")
             lines.append("")
 
         if s["risks"]:
-            lines.append("🚨 **风险**")
+            lines.append("🚨 风险")
             for r in s["risks"][:3]:
                 lines.append(f"  - {r.get('description', r.get('relation_type', ''))}")
             lines.append("")
 
         if s["follow_ups"]:
-            lines.append("📌 **需跟进**")
+            lines.append("📌 需跟进")
             for f in s["follow_ups"][:3]:
                 lines.append(f"  - {f.get('description', f.get('relation_type', ''))}")
             lines.append("")
 
         if s["memories"]:
-            lines.append("🧠 **长期记忆**")
+            lines.append("🧠 长期记忆")
             for m in s["memories"][:5]:
                 imp = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
                     m.get("importance", ""), "")
@@ -692,7 +679,7 @@ def _cmd_client_suggestions(arg: str) -> dict:
         if s["projects"]:
             active = [p for p in s["projects"] if p.get("status") == "active"]
             if active:
-                lines.append(f"📁 **活跃项目 ({len(active)})**")
+                lines.append(f"📁 活跃项目 ({len(active)})")
                 for p in active[:5]:
                     lines.append(f"  - {p['name']}")
 
@@ -702,7 +689,7 @@ def _cmd_client_suggestions(arg: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_client_suggestions", "client", None, "error", str(e))
-        return {"reply_text": f"生成建议失败：{str(e)[:200]}",
+        return {"reply_text": _fe("生成建议失败"),
                 "action": "client_suggestions_error", "success": False}
 
 
@@ -724,32 +711,32 @@ def _cmd_project_suggestions(arg: str) -> dict:
         s = generate_project_suggestions(projects[0]["id"])
 
         p = s["project"]
-        lines = [f"📋 **{p['name']} — 项目建议**", ""]
+        lines = [f"📋 {p['name']} — 项目建议", ""]
 
         if s.get("next_steps"):
             lines.append(f"💡 {s['next_steps']}")
             lines.append("")
 
         if s["overdue_tasks"]:
-            lines.append(f"⚠️ **逾期任务 ({len(s['overdue_tasks'])})**")
+            lines.append(f"⚠️ 逾期任务 ({len(s['overdue_tasks'])})")
             for t in s["overdue_tasks"][:5]:
                 lines.append(f"  - {t['title']} — {t.get('due_date', '')}")
             lines.append("")
 
         if s["blocked_tasks"]:
-            lines.append(f"🚫 **阻塞任务 ({len(s['blocked_tasks'])})**")
+            lines.append(f"🚫 阻塞任务 ({len(s['blocked_tasks'])})")
             for t in s["blocked_tasks"][:5]:
                 lines.append(f"  - {t.get('title', '')}")
             lines.append("")
 
         if s["risks"]:
-            lines.append("🚨 **项目风险**")
+            lines.append("🚨 项目风险")
             for r in s["risks"][:3]:
                 lines.append(f"  - {r.get('description', r.get('relation_type', ''))}")
             lines.append("")
 
         if s["memories"]:
-            lines.append("🧠 **长期记忆**")
+            lines.append("🧠 长期记忆")
             for m in s["memories"][:5]:
                 imp = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
                     m.get("importance", ""), "")
@@ -765,7 +752,7 @@ def _cmd_project_suggestions(arg: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_project_suggestions", "project", None, "error", str(e))
-        return {"reply_text": f"生成建议失败：{str(e)[:200]}",
+        return {"reply_text": _fe("生成建议失败"),
                 "action": "project_suggestions_error", "success": False}
 
 
@@ -792,23 +779,23 @@ def _cmd_project_status(project_name: str) -> dict:
         progress = get_project_progress(pid)
         current = get_current_stage(pid)
 
-        lines = [f"📊 **{p['name']} — 项目状态**", ""]
+        lines = [f"📊 {p['name']} — 项目状态", ""]
 
         # 阶段信息
         if progress["total_stages"] > 0:
             current_name = current["stage_name"] if current else "未设置"
-            lines.append(f"📌 **当前阶段**：{current_name}")
-            lines.append(f"📈 **阶段进度**：{progress['completed_stages']}/{progress['total_stages']} ({progress['stage_completion_pct']:.0f}%)")
-            lines.append(f"✅ **任务完成率**：{progress['done_tasks']}/{progress['total_tasks']} ({progress['task_completion_pct']:.0f}%)")
+            lines.append(f"📌 当前阶段：{current_name}")
+            lines.append(f"📈 阶段进度：{progress['completed_stages']}/{progress['total_stages']} ({progress['stage_completion_pct']:.0f}%)")
+            lines.append(f"✅ 任务完成率：{progress['done_tasks']}/{progress['total_tasks']} ({progress['task_completion_pct']:.0f}%)")
 
             # 各阶段状态
             stage_line = " → ".join([
                 f"{'✅' if s['status'] == 'completed' else '⏭️' if s['status'] == 'skipped' else '🔵' if s['status'] == 'active' else '⚪'}{s['stage_name']}"
                 for s in progress.get("stage_breakdown", [])
             ])
-            lines.append(f"🔄 **阶段流**：{stage_line}")
+            lines.append(f"🔄 阶段流：{stage_line}")
         else:
-            lines.append("📌 **阶段**：未初始化（发送 /项目建议 查看详情）")
+            lines.append("📌 阶段：未初始化（发送 /项目建议 查看详情）")
 
         lines.append("")
 
@@ -816,16 +803,16 @@ def _cmd_project_status(project_name: str) -> dict:
         all_risks = detect_project_risks()
         p_risks = [r for r in all_risks if r.get("project_id") == pid]
         if p_risks:
-            lines.append(f"🚨 **风险 ({len(p_risks)})**")
+            lines.append(f"🚨 风险 ({len(p_risks)})")
             for r in p_risks[:3]:
                 level_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(r.get("risk_level", ""), "")
                 lines.append(f"  {level_emoji} [{r.get('risk_type', '')}] {r.get('description', '')}")
 
         # 剩余任务
         if progress["remaining_tasks"] > 0:
-            lines.append(f"📝 **剩余任务**：{progress['remaining_tasks']} 个")
+            lines.append(f"📝 剩余任务：{progress['remaining_tasks']} 个")
 
-        lines.append(f"📋 **项目状态**：{p.get('status', '—')}")
+        lines.append(f"📋 项目状态：{p.get('status', '—')}")
 
         add_workflow_log("feishu_project_status", "project", pid, "success",
                          f"项目状态: {p['name']}")
@@ -833,7 +820,7 @@ def _cmd_project_status(project_name: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_project_status", "project", None, "error", str(e))
-        return {"reply_text": f"查询失败：{str(e)[:200]}",
+        return {"reply_text": _fe("查询失败"),
                 "action": "project_status_error", "success": False}
 
 
@@ -861,7 +848,7 @@ def _cmd_client_status(client_name: str) -> dict:
             (cid,),
         )
 
-        lines = [f"👤 **{c['name']} — 客户状态**", ""]
+        lines = [f"👤 {c['name']} — 客户状态", ""]
 
         active_count = sum(1 for p in projects if p["status"] == "active")
         lines.append(f"📊 活跃项目: {active_count} | 总项目: {len(projects)}")
@@ -872,7 +859,7 @@ def _cmd_client_status(client_name: str) -> dict:
         lines.append("")
 
         if active_count > 0:
-            lines.append("**活跃项目阶段：**")
+            lines.append("活跃项目阶段：")
             for p in projects:
                 if p["status"] != "active":
                     continue
@@ -881,13 +868,13 @@ def _cmd_client_status(client_name: str) -> dict:
                     if progr["total_stages"] > 0:
                         current = progr.get("active_stage", {})
                         stage_name = current.get("stage_name", "—") if current else "—"
-                        lines.append(f"  📁 **{p['name']}**: {stage_name} "
+                        lines.append(f"  📁 {p['name']}: {stage_name} "
                                     f"({progr['completed_stages']}/{progr['total_stages']}, "
                                     f"任务 {progr['task_completion_pct']:.0f}%)")
                     else:
-                        lines.append(f"  📁 **{p['name']}**: 未初始化阶段")
+                        lines.append(f"  📁 {p['name']}: 未初始化阶段")
                 except Exception:
-                    lines.append(f"  📁 **{p['name']}**: 查询失败")
+                    lines.append(f"  📁 {p['name']}: 查询失败")
         else:
             lines.append("暂无活跃项目。")
 
@@ -903,7 +890,7 @@ def _cmd_client_status(client_name: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_client_status", "client", None, "error", str(e))
-        return {"reply_text": f"查询失败：{str(e)[:200]}",
+        return {"reply_text": _fe("查询失败"),
                 "action": "client_status_error", "success": False}
 
 
@@ -926,7 +913,7 @@ def _cmd_project_risk(project_name: str) -> dict:
         p = projects[0]
         pid = p["id"]
 
-        lines = [f"🚨 **{p['name']} — 项目风险**", ""]
+        lines = [f"🚨 {p['name']} — 项目风险", ""]
 
         # 结构化风险
         all_risks = detect_project_risks()
@@ -938,7 +925,7 @@ def _cmd_project_risk(project_name: str) -> dict:
             low_risks = [r for r in p_risks if r.get("risk_level") == "low"]
 
             if high_risks:
-                lines.append(f"🔴 **高风险 ({len(high_risks)})**")
+                lines.append(f"🔴 高风险 ({len(high_risks)})")
                 for r in high_risks:
                     lines.append(f"  - [{r.get('risk_type', '')}] {r.get('description', '')}")
                     if r.get("suggestion"):
@@ -946,13 +933,13 @@ def _cmd_project_risk(project_name: str) -> dict:
                 lines.append("")
 
             if med_risks:
-                lines.append(f"🟡 **中风险 ({len(med_risks)})**")
+                lines.append(f"🟡 中风险 ({len(med_risks)})")
                 for r in med_risks[:5]:
                     lines.append(f"  - [{r.get('risk_type', '')}] {r.get('description', '')}")
                 lines.append("")
 
             if low_risks:
-                lines.append(f"🟢 **低风险 ({len(low_risks)})**")
+                lines.append(f"🟢 低风险 ({len(low_risks)})")
                 for r in low_risks[:3]:
                     lines.append(f"  - [{r.get('risk_type', '')}] {r.get('description', '')}")
         else:
@@ -961,7 +948,7 @@ def _cmd_project_risk(project_name: str) -> dict:
         # 风险关系
         rel_risks = find_entity_risks("project", pid)
         if rel_risks:
-            lines.append(f"\n🔗 **风险关系 ({len(rel_risks)})**")
+            lines.append(f"\n🔗 风险关系 ({len(rel_risks)})")
             for r in rel_risks[:3]:
                 lines.append(f"  - {r.get('description', r.get('relation_type', ''))}")
 
@@ -971,7 +958,7 @@ def _cmd_project_risk(project_name: str) -> dict:
 
     except Exception as e:
         add_workflow_log("feishu_project_risk", "project", None, "error", str(e))
-        return {"reply_text": f"风险查询失败：{str(e)[:200]}",
+        return {"reply_text": _fe("风险查询失败"),
                 "action": "project_risk_error", "success": False}
 
 
@@ -1046,7 +1033,7 @@ def _handle_document_section_command(sender_id: str, section_index: int = None,
         return {"reply_text": f"✅ {result['message']}\n\n来源：文档第{section['section_id']}部分「{section.get('title', '')}」",
                 "action": "section_action", "success": True}
     else:
-        return {"reply_text": f"执行失败：{result['message']}", "action": "section_action_error", "success": False}
+        return {"reply_text": _fe("执行失败"), "action": "section_action_error", "success": False}
 
 
 # ── AI 问答 ──
@@ -1117,17 +1104,8 @@ def _format_suggestions(actions: list) -> str:
     """格式化建议动作为文本。"""
     if not actions:
         return ""
-    lines = ["", "💡 **建议动作：**"]
-    for i, a in enumerate(actions):
-        a_type = a.get("action_type", "")
-        title = a.get("title", "")
-        type_label = {"create_task": "创建任务", "create_timeline_event": "写入时间轴",
-                      "link_relation": "建立关联", "generate_summary": "生成总结"}.get(a_type, a_type)
-        lines.append(f"{i+1}. {type_label}：{title}")
-    lines.append("")
-    lines.append(f"回复「执行N」执行对应建议（如 执行1）")
-    lines.append(f"回复「修改N xx改成yy」可修改后再执行")
-    return "\n".join(lines)
+    from services.feishu.reply_formatter import format_suggestions
+    return format_suggestions({"items": actions})
 
 
 # ── 会话意图检测 ──
@@ -1275,7 +1253,7 @@ def _cmd_execute_range(sender_id: str, count: int) -> dict:
     from services.action_executor_service import execute_action
 
     success_count = 0
-    lines = [f"📋 **执行前 {count} 条：**", ""]
+    lines = [f"📋 执行前 {count} 条：", ""]
     for i, action in enumerate(subset):
         try:
             result = execute_action(action)
@@ -1460,25 +1438,13 @@ def _handle_context_reference(text: str, sender_id: str) -> dict | None:
 # ── 回复格式化 ──
 
 def _build_qa_reply(answer: str, sources: list, suggestions_text: str = "") -> str:
-    """构建 QA 回复：截断 + 来源 + 建议。"""
-    truncated = _truncate(answer, max_len=MAX_REPLY_LENGTH - len(suggestions_text) - 150)
-
-    parts = [truncated]
-
-    if sources:
-        source_lines = ["", "📎 **参考来源：**"]
-        for s in sources[:MAX_SOURCES]:
-            title = (s.get("title") or s.get("name") or s.get("filename") or "—")[:40]
-            src_type = s.get("source_type", "")
-            type_cn = {"client": "客户", "project": "项目", "task": "任务", "file": "文件",
-                       "timeline_events": "事件", "knowledge_items": "知识"}.get(src_type, src_type)
-            source_lines.append(f"- [{type_cn}] {title}")
-        parts.append("\n".join(source_lines))
-
-    if suggestions_text:
-        parts.append(suggestions_text)
-
-    return "\n".join(parts)
+    """构建 QA 回复：委托给 reply_formatter。"""
+    from services.feishu.reply_formatter import format_rag_answer
+    return format_rag_answer({
+        "answer": answer,
+        "sources": sources,
+        "item_count": len(sources),
+    })
 
 
 def _truncate(text: str, max_len: int = MAX_REPLY_LENGTH) -> str:

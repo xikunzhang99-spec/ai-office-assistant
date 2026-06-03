@@ -49,31 +49,31 @@ def build_reminder_message() -> str:
     upcoming = get_due_tasks(3)
     high_priority = get_high_priority_undone()
 
-    lines = ["📋 **AI 办公助理 — 任务提醒**", ""]
+    lines = ["📋 AI 办公助理 — 任务提醒", ""]
 
     if overdue:
-        lines.append(f"### ⚠️ 逾期任务 ({len(overdue)})")
+        lines.append(f"🔔  ⚠️ 逾期任务 ({len(overdue)})")
         for t in overdue:
             due = t["due_date"] or "无截止日期"
             lines.append(f"- [{t['priority']}] {t['title']} — 截止: {due}")
         lines.append("")
 
     if today:
-        lines.append(f"### 📅 今日任务 ({len(today)})")
+        lines.append(f"🔔  📅 今日任务 ({len(today)})")
         for t in today:
             p_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(t["priority"], "")
             lines.append(f"- {p_emoji} {t['title']}")
         lines.append("")
 
     if upcoming:
-        lines.append(f"### 🔜 未来3天 ({len(upcoming)})")
+        lines.append(f"🔔  🔜 未来3天 ({len(upcoming)})")
         for t in upcoming:
             due = t["due_date"] or ""
             lines.append(f"- [{t['priority']}] {t['title']} — {due}")
         lines.append("")
 
     if high_priority:
-        lines.append(f"### 🔴 高优先级未完成 ({len(high_priority)})")
+        lines.append(f"🔔  🔴 高优先级未完成 ({len(high_priority)})")
         for t in high_priority:
             lines.append(f"- {t['title']}")
         lines.append("")
@@ -122,7 +122,7 @@ def generate_today_briefing() -> str:
     )
     if projects:
         for p in projects:
-            lines.append(f"- **{p['name']}** (进行中)")
+            lines.append(f"- {p['name']} (进行中)")
     else:
         lines.append("无活跃项目")
     lines.append("")

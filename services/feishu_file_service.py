@@ -12,6 +12,11 @@ SUPPORTED_TYPES = {".docx", ".pdf", ".txt", ".xlsx", ".md", ".csv"}
 MAX_FILE_SIZE = 20 * 1024 * 1024
 
 
+def _fmt_error(reason, suggestion=""):
+    from services.feishu.reply_formatter import format_error
+    return format_error(reason, suggestion)
+
+
 def _get_tenant_token() -> str:
     from services.feishu_service import get_tenant_access_token
     result = get_tenant_access_token()
@@ -206,12 +211,12 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
     if not file_key:
         add_workflow_log("feishu_file_error", "feishu", None, "error", "缺少 file_key", run_id=run_id)
         WorkflowService.fail_step(run_id, "extract_file_info", "缺少 file_key")
-        return {"reply_text": "文件信息不完整，无法处理。", "action": "file_error", "success": False}
+        return {"reply_text": _fmt_error("文件信息不完整"), "action": "file_error", "success": False}
 
     if not _is_supported(file_type):
         add_workflow_log("feishu_file_error", "feishu", None, "error", f"不支持格式: {file_type}", run_id=run_id)
         WorkflowService.fail_step(run_id, "check_supported", f"不支持格式: {file_type}")
-        return {"reply_text": f"暂不支持 {file_type} 格式。\n支持: {', '.join(sorted(SUPPORTED_TYPES))}",
+        return {"reply_text": _fmt_error(f"暂不支持 {file_type} 格式", f"支持: {', '.join(sorted(SUPPORTED_TYPES))}"),
                 "action": "file_unsupported", "success": True}
     WorkflowService.complete_step(run_id, "extract_file_info", f"file_key={file_key[:20]}...")
     WorkflowService.complete_step(run_id, "check_supported", f"格式: {file_type}")
@@ -222,7 +227,7 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         add_workflow_log("file_download_failed", "feishu", None, "error",
                          f"{file_name}: {dl_result['error']}", run_id=run_id)
         WorkflowService.fail_step(run_id, "download_file", dl_result["error"])
-        return {"reply_text": f"文件下载失败\n\n{dl_result['error']}",
+        return {"reply_text": _fmt_error("文件下载失败", "请确认文件可访问后重试"),
                 "action": "file_download_error", "success": False}
     file_bytes = dl_result["content"]
     add_workflow_log("file_download_success", "feishu", None, "success",
@@ -279,7 +284,7 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         add_workflow_log("file_parse_failed", "feishu", None, "error",
                          f"{file_name}: {str(e)}", run_id=run_id)
         WorkflowService.fail_step(run_id, "parse_text", str(e))
-        return {"reply_text": f"文件「{file_name}」解析失败：{str(e)[:200]}",
+        return {"reply_text": _fmt_error(f"文件「{file_name}」解析失败", "请检查文件是否损坏"),
                 "action": "file_parse_error", "success": False}
     add_workflow_log("file_parse_success", "feishu", None, "success",
                      f"{file_name} ({len(text_content)} chars)", run_id=run_id)
@@ -293,7 +298,7 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
         add_workflow_log("file_summary_failed", "feishu", None, "error",
                          f"{file_name}: {str(e)}", run_id=run_id)
         WorkflowService.fail_step(run_id, "ai_summarize", str(e))
-        return {"reply_text": f"AI 分析失败：{str(e)[:200]}",
+        return {"reply_text": _fmt_error("AI 分析失败", "请检查 AI 服务是否正常后重试"),
                 "action": "file_analysis_error", "success": False}
 
     summary = analysis.get("summary", "")[:500]
@@ -489,54 +494,14 @@ def handle_feishu_file_message(message_event: dict, message_id: str = None,
 def _build_file_reply(file_name: str, file_type: str, summary: str,
                       key_points: list, tags: list, matched: dict,
                       pending_actions: list, doc_actions: list = None) -> str:
-    lines = ["✅ 文件已处理完成", ""]
-    lines.append(f"📄 文件：{file_name}（{file_type}）")
-
-    if summary:
-        lines.append(f"📝 摘要：{summary[:200]}{'…' if len(summary) > 200 else ''}")
-
-    if key_points:
-        lines.append("🔑 关键点：")
-        for kp in key_points[:3]:
-            lines.append(f"  - {kp}")
-
-    if tags:
-        lines.append(f"🏷️ 标签：{', '.join(tags[:5])}")
-
-    if matched["client_name"]:
-        lines.append(f"👤 关联客户：{matched['client_name']}")
-    if matched["project_name"]:
-        lines.append(f"📁 关联项目：{matched['project_name']}")
-
-    if not matched["client_name"] and not matched["project_name"]:
-        lines.append("⚠️ 未识别到关联客户/项目，可后续手动关联")
-
-    # 文档动作建议（优先展示）
-    if doc_actions:
-        lines.append("")
-        lines.append("📋 **文档动作建议：**")
-        type_emoji = {"create_project": "🆕", "create_task": "📝", "create_client": "👤",
-                      "risk_alert": "⚠️", "create_timeline_event": "📅",
-                      "link_relation": "🔗"}
-        for i, a in enumerate(doc_actions[:5]):
-            emoji = type_emoji.get(a.get("action_type", ""), "📌")
-            type_cn = {"create_project": "创建项目", "create_task": "创建任务",
-                       "create_client": "创建客户", "risk_alert": "风险提醒",
-                       "create_timeline_event": "写入时间轴",
-                       "link_relation": "建立关联"}.get(a.get("action_type", ""), a.get("action_type", ""))
-            conf = a.get("confidence", 0)
-            conf_str = f" [{int(conf*100)}%]" if conf else ""
-            lines.append(f"  {i+1}. {emoji} {type_cn}：{a.get('title', '')}{conf_str}")
-        lines.append("")
-        lines.append("回复「执行N」执行对应建议，或「执行全部」批量执行")
-        lines.append("也可「把第N部分创建成项目/任务」按段落执行")
-
-    elif pending_actions:
-        lines.append("")
-        lines.append("💡 建议任务：")
-        for i, a in enumerate(pending_actions[:5]):
-            lines.append(f"  {i+1}. {a['title']}")
-        lines.append("")
-        lines.append("回复「执行N」即可创建对应任务")
-
-    return "\n".join(lines)
+    from services.feishu.reply_formatter import format_file_processed
+    return format_file_processed({
+        "filename": file_name,
+        "file_type": file_type,
+        "summary": summary,
+        "key_points": key_points,
+        "tags": tags,
+        "matched": matched,
+        "pending_actions": pending_actions,
+        "doc_actions": doc_actions or [],
+    })
