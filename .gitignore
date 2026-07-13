@@ -28,4 +28,5 @@ venv/
 *.db
 
 # 数据库备份
-data/backups/
+data/backups/data/app.db-shm
+data/app.db-wal

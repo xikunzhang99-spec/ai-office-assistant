@@ -1,231 +1,57 @@
 # PROJECT_STATE.md — AI办公助理 项目交接文档
 
-> 最后更新: 2026-06-03
-> 当前阶段: Feishu Assistant Reply Optimization V1 — 已完成
-> 项目状态: 13 个页面，20 张表，45+ 个服务文件，Obsidian 双向同步，飞书多轮上下文 + 确认式执行，长期记忆 + 关系图谱 + 主动建议 + 工作流引擎 + Business Brain + RAG 语义搜索 + 回复格式化
+> 最后更新: 2026-06-11
+> 当前阶段: 重构 V2 — 页面优化 + 日历 + 时间轴
+> 项目状态: 5 个页面，21 张表（空数据），13 个核心服务，本地个人长期使用
 
 ---
 
 ## 1. 项目目标
 
-**AI办公助理** 是一个本地优先（local-first）的 AI 驱动个人办公助理系统。核心定位：
+**AI办公助理** 是一个本地优先（local-first）的 AI 驱动个人办公助理系统。
 
 - 帮助个人用户管理每日任务、随手记、文件、项目、客户
 - 通过 AI 自动生成文件摘要、每日工作总结
-- 所有系统活动自动记录到时间轴（event sourcing 模式）
-- 将 AI 生成的 Markdown 内容自动写入 Obsidian Vault
+- 所有系统活动自动记录到时间轴
+- 日历视图显示被标记任务的截止日期
 - 全部数据存储在本地 SQLite，无需网络即可运行核心功能
-- 飞书机器人支持多轮上下文对话、确认式执行、主动建议
-- Business Brain 业务理解层：内容识别、实体提取、动作规划
-- RAG 语义搜索：知识块向量化、numpy 语义检索、来源引用问答
-- 飞书回复格式化：统一简洁、手机友好、无 Markdown 污染
 
-**非目标（明确不做）**：
-- React / Next.js 前端（暂保持 Streamlit）
-- 复杂多跳推理、多用户权限、移动端 App
+**当前不做**：
+- 飞书集成（相关代码保留在 services/ 中但未启用）
+- React / Next.js 前端
+- 云端部署
+- 多人协作
+- Chroma 向量数据库（使用 numpy embedding 方案）
 
 ---
 
-## 2. 已实现功能
-
-### 2.1 13 个功能页面
+## 2. 5 个功能页面
 
 | 页面 | 文件 | 功能描述 |
 |------|------|----------|
-| **每日工作台** | `pages/dashboard.py` | 日/周/月视图；今日任务指标；任务快速操作；逾期提醒；随手记；时间轴；AI 主动建议；快速统计卡片 |
-| **任务管理** | `pages/tasks.py` | 任务 CRUD；4 列多筛；内联编辑；删除；查看详情 |
-| **日历视图** | `pages/calendar_view.py` | 月历网格；任务计数；逾期标记；点击日期查看详情 |
-| **时间轴** | `pages/timeline.py` | 日/周/月/全部视图；4 列筛选；事件类型20+ |
-| **AI问答** | `pages/ai_query.py` | 关键词/语义/混合搜索；Hybrid RAG；AI行动建议+执行；知识库维护 |
-| **RAG问答** 🆕 | `pages/rag_qa.py` | Chunks/Keyword/Semantic/Hybrid 四模式；语义检索；来源引用；知识块状态 |
-| **业务大脑** 🆕 | `pages/business_brain.py` | 自然语言输入 → AI 分析 → 结构化结果 → 确认/修改/执行 |
-| **文件上传** | `pages/files.py` | 上传+AI解析+摘要；自动工作流；任务建议；文档动作分析+执行；长期记忆提取 |
-| **每日总结** | `pages/daily_summary.py` | AI 生成总结；历史列表 |
-| **项目管理** | `pages/projects.py` | 项目CRUD；进度条；阶段可视化；推进/跳过按钮 |
-| **客户管理** | `pages/clients.py` | 客户CRUD；查看详情（长期记忆+跟进建议+风险） |
-| **数据管理** | `pages/data_management.py` | 数据库统计；知识库维护；知识块入库🆕；数据导出；批量清理；Obsidian同步；飞书通知 |
-| **工作流监控** 🆕 | `pages/workflow_dashboard.py` | 运行中/待确认/失败/已完成 工作流；步骤详情；确认/重试操作 |
-
-### 2.2 时间轴事件系统
-
-20+ 种事件类型被自动记录，包含 project_id、client_id、tags、metadata。
-
-### 2.3 AI 集成
-
-- 统一 OpenAI-compatible API 客户端（`services/ai_service.py`）
-- `_chat()` 参数化 temperature、max_tokens
-- 文件摘要、每日总结、AI 问答、AI 行动建议、AI 任务建议
-- 长期记忆 AI 提取（temperature=0.2）
-- 内容意图检测 `detect_content_intent()` — 7 种类型分类
-
-### 2.4 Obsidian 集成
-
-- 客户/项目/任务/文件/每日总结 → Obsidian Vault 双向同步
-- content_hash 去重，自动归档（Active ↔ Archive/Completed）
-
-### 2.5 统一搜索 + 关系网络 + RAG
-
-- **search_service.py** — 跨 7 表统一搜索 + build_context + `semantic_search_chunks()` 🆕
-- **relation_service.py** — 9 种语义关系类型，关系图谱，风险/跟进查询
-- **knowledge_service.py** — 知识条目同步 + 多关键词加权搜索
-- **embedding_service.py** — Embedding 生成 + numpy 语义搜索 + chunk 级别向量化 🆕
-- **hybrid_search_service.py** — 关键词+语义合并去重归一化
-- **rag_service.py** — 四层 RAG（chunks/keyword/semantic/hybrid）+ 内存缓存 + memory_items 上下文增强 🆕
-- **action_suggestion_service.py** — AI 行动建议（6 种动作类型）
-- **action_executor_service.py** — 一键执行建议动作（支持 9 种动作类型）🆕
-- **knowledge_ingestion.py** 🆕 — 文本切分 + Obsidian/项目/总结多渠道入库
-
-### 2.6 飞书深度集成
-
-#### 消息处理
-- **feishu_api.py** — FastAPI webhook 端点，只负责接收事件+回复消息，不写业务逻辑
-- **feishu_message_service.py** — 命令路由、AI问答、多轮上下文、确认式执行
-- **feishu_file_service.py** — 文件下载→解析→AI分析→去重→知识库→Embedding→Obsidian→长期记忆
-- **feishu_session_service.py** — 会话状态管理（30分钟过期，DB持久化）
-- **feishu_command_parser.py** — 自然语言命令解析（/新客户 /新项目 /新任务）
-
-#### 飞书回复优化 🆕
-- **reply_formatter.py** — 统一回复格式化模块（11 个格式化函数）
-- 可配置：`FEISHU_REPLY_STYLE`, `FEISHU_REPLY_MAX_ITEMS`, `FEISHU_ENABLE_EMOJI`, `FEISHU_SHOW_DEBUG`
-- 无 `**` `###` `---` Markdown 污染，适合手机阅读
-- 错误信息自动脱敏（移除 traceback、JSON、内部 ID）
-
-#### 飞书命令
-| 命令 | 说明 |
-|------|------|
-| `/帮助` | 命令列表 |
-| `/任务 今天/逾期/未来3天` | 任务查询 |
-| `/总结 今天` | 今日简报 |
-| `/问 xxx` | AI 查询 |
-| `/新客户` `/新项目` `/新任务` | 数据创建 |
-| `/今日建议` | 主动建议（重点任务+逾期+风险+跟进+记忆） |
-| `/客户建议 客户名` | 客户级建议（风险+跟进+记忆） |
-| `/项目建议 项目名` | 项目级建议（风险+阻塞+下一步） |
-| `/项目状态 项目名` | 当前阶段、阶段流、进度%、剩余任务、风险 |
-| `/客户状态 客户名` | 客户概况、活跃项目阶段 |
-| `/项目风险 项目名` | 详细风险分析（高/中/低 + 建议） |
-
-#### 多轮上下文 + 确认式执行
-- 连续对话不丢失上下文
-- AI 只生成建议，用户回复"执行1/执行全部/确认"后才执行
-- 支持修改建议（"修改1 名字改成 xxx"）
-- 支持范围执行（"只创建前3个"）
-- 支持文档选段（"把第2部分创建成任务"）
-- 上下文指代（"它/这个/上面的文件"）
-- 双重存储（DB session + 内存 fallback）
-
-### 2.7 长期记忆系统
-
-- **memory_items** 表 — 7 种记忆类型
-- **memory_service.py** — AI 提取 + 幂等保存 + 按客户/项目/任务查询 + 搜索 + 重建
-- 从文件上传、AI问答、飞书对话中自动提取
-- Dashboard/客户详情/项目详情 展示长期记忆
-- RAG 回答自动引用相关记忆和风险关系
-
-### 2.8 关系图谱增强
-
-- 9 种语义关系类型：belongs_to, related_to, depends_on, blocks, caused_by, mentioned_in, created_from, follow_up_required, risk_related
-- **get_entity_graph()** — 实体完整关系图谱（节点+边+风险+跟进）
-- **get_client_graph()** — 客户图谱（向下遍历项目/任务/文件 + 记忆 + 风险）
-- **get_project_graph()** — 项目图谱（含记忆 + 风险）
-- **find_risk_relations() / find_follow_up_relations()** — 全局风险/跟进查询
-
-### 2.9 主动工作流建议
-
-- **proactive_suggestion_service.py** — 每日/项目/客户级主动建议
-- 逾期检测、项目风险检测（多维度：标记风险+高优逾期+阻塞任务）
-- 需跟进客户检测（30天无活动但有活跃项目）
-- AI 生成总结建议
-
-### 2.10 工作流引擎 (Workflow Agent V2) 🆕
-
-#### 运行状态管理
-- **workflow_runs** 表 — 每次工作流执行的完整记录
-- **workflow_steps** 表 — 每个步骤的执行状态（pending/running/completed/failed/skipped）
-- **workflow_logs** 表 — 增强：新增 run_id、step_id 列
-
-#### 8 种工作流类型
-| 工作流 | 步骤数 | 说明 |
-|--------|--------|------|
-| file_processing | 16 | 文件处理（含确认点 generate_preview） |
-| feishu_message | 6 | 飞书消息处理 |
-| task_creation | 5 | 任务创建 |
-| project_update 🆕 | 4 | 项目更新 |
-| client_update 🆕 | 4 | 客户跟进 |
-| timeline_record 🆕 | 3 | 时间轴记录 |
-| note_creation 🆕 | 4 | 笔记创建 |
-| summary_creation 🆕 | 4 | 总结生成 |
-
-#### 核心能力
-- **workflow_engine.py** — 阶段管理（初始化/推进/跳过/推断/进度）
-- **workflow_service.py** 🆕 — 运行生命周期、步骤执行、确认/取消/重试、查询
-- **risk_detection_service.py** — 项目6维/客户4维/任务3维风险检测
-- **workflow_agent_service.py** — 统一编排 `analyze_business_state()`
-- 人工确认机制：generate_preview → waiting_confirmation → confirm/cancel
-- 失败重试：retry_run() 重置所有步骤
-
-### 2.11 Business Brain V1（业务大脑）🆕
-
-#### 模块结构 (`services/business_brain/`)
-| 文件 | 职责 |
-|------|------|
-| `brain_service.py` | 统一入口 `analyze_input()` + `execute_actions()` |
-| `classifier.py` | 内容类型识别（9 种类型） |
-| `extractor.py` | AI 调用 + JSON 解析 + 结构化提取 |
-| `entity_matcher.py` | 模糊匹配已有客户/项目/标签 |
-| `action_planner.py` | 建议动作生成 + 工作流类型映射 |
-| `prompts.py` | 统一提示词管理 |
-
-#### 支持的内容类型（9 种）
-task, note, project_update, client_update, meeting_note, file_summary, daily_record, idea, unknown
-
-#### 支持的动作类型（9 种）
-create_task, create_note, update_project, update_client, create_timeline, create_summary, send_reminder, ask_confirmation, ignore
-
-#### 结构化输出字段
-content_type, title, summary, entities (clients/projects/people/tasks/deadlines/dates), tags, suggested_actions, confidence, need_human_confirmation
-
-### 2.12 RAG + 语义搜索 V1（知识块检索）🆕
-
-#### 知识块系统
-- **knowledge_chunks** 表 — 统一可检索文本块（含 embedding 列）
-- **knowledge_ingestion.py** — 文本切分（500-800 chars, 100-150 overlap）+ 多渠道入库
-- 入库来源：Obsidian Markdown 笔记、项目/时间轴、每日总结/随手记
-- 向量化：numpy 批量余弦相似度搜索
-
-#### 语义搜索
-- `search_service.semantic_search_chunks()` — query embedding + numpy 相似度计算
-- `embedding_service.search_chunks_numpy()` — 批量矩阵运算加速
-- 返回：chunk_id, source_type, source_title, content, score, metadata
-
-#### RAG 问答
-- `rag_service.answer_with_chunks()` — 四模式（chunks/keyword/semantic/hybrid）
-- AI 严格基于上下文回答，资料不足时明确说明
-- 来源引用：source_title, source_type, source_id, date, chunk_id, score
-- 页面：`pages/rag_qa.py` 含知识块状态、示例问题、来源展示
+| **每日工作台** | `pages/01_daily_workspace.py` | 今日随手记（左输入+右总览）、今日任务（含日历标记按钮）、日历视图（月份切换+任务高亮）、本周概览、最近项目、最近客户、文件上传+AI解析、每日总结生成 |
+| **时间轴** | `pages/05_timeline.py` | 日期筛选、事件类型分组筛选（全部/手动/随手记/任务/文件/项目/客户/总结/AI问答）、关键词搜索、手动记录、事件列表 |
+| **业务管理** | `pages/02_business_management.py` | 4 Tab：任务管理（CRUD+筛选+日历标记）、项目管理（CRUD+阶段+任务进度）、客户管理（CRUD+关联项目）、关系查看（按客户/项目/全局风险+跟进） |
+| **AI问答** | `pages/03_ai_assistant.py` | 自动选择搜索策略（SQL→关键词→语义→AI通用），高级模式可手动切换，来源引用，无本地数据不编造 |
+| **数据管理** | `pages/04_data_management.py` | 6 Tab：数据统计（18表）、数据库备份、清空业务数据（RESET确认+自动备份）、重建索引/Embedding、清理孤儿数据、导出CSV/DB |
 
 ---
 
 ## 3. 核心技术栈
 
-| 层级 | 技术 | 版本要求 |
-|------|------|----------|
-| **UI** | Streamlit | >=1.28.0 |
-| **飞书API** | FastAPI + uvicorn | — |
-| **数据库** | SQLite（WAL模式） | 系统自带 |
-| **向量搜索** | numpy + FAISS 1.14.2 🆕 | — |
-| **AI SDK** | `openai` (OpenAI-compatible) | >=1.0.0 |
-| **配置管理** | `python-dotenv` | >=1.0.0 |
-| **文件解析** | `python-docx`, `python-pptx`, `openpyxl`, `PyPDF2` | 见 requirements.txt |
-| **数据处理** | `pandas` | >=2.0.0 |
-| **运行环境** | Python 3.x（macOS / Linux） | — |
+| 层级 | 技术 |
+|------|------|
+| **UI** | Streamlit 1.56+ (st.navigation 多页面路由) |
+| **数据库** | SQLite（WAL模式） |
+| **向量搜索** | numpy（批量余弦相似度） |
+| **AI SDK** | `openai` (OpenAI-compatible) |
+| **配置管理** | `python-dotenv` |
+| **文件解析** | `python-docx`, `python-pptx`, `openpyxl`, `PyPDF2` |
 
 **数据库细节**:
 - 文件: `data/app.db`
-- 日志模式: **WAL** (Write-Ahead Logging)
-- 同步级别: NORMAL
+- 日志模式: **WAL**
 - 外键: 开启
-- 繁忙超时: 5000ms
 - 行工厂: `sqlite3.Row`（fetch_one/fetch_all 自动转 dict）
 - **返回类型**: `fetch_one` → `dict | None`, `fetch_all` → `list[dict]`
 
@@ -235,263 +61,175 @@ content_type, title, summary, entities (clients/projects/people/tasks/deadlines/
 
 ```text
 ai-office-assistant/
-├── .env                          # 环境变量（AI密钥、飞书APP_ID/SECRET、路径、回复配置）
+├── app.py                         # Streamlit入口（st.navigation 路由，5个中文页面）
+├── PROJECT_STATE.md               # 本文档
 ├── README.md
-├── PROJECT_STATE.md              # 本文档
 ├── requirements.txt
-├── app.py                        # Streamlit入口 + 导航路由（13页）
-├── feishu_api.py                 # FastAPI 飞书 webhook（只负责接收+回复）
-├── seed_data.py                  # 测试数据生成器
+├── .env                           # 环境变量
 │
 ├── config/
-│   ├── __init__.py
-│   └── settings.py               # 读取.env，导出所有配置常量（含FEISHU_REPLY_* 🆕）
+│   └── settings.py                # 配置管理
 │
 ├── database/
-│   ├── __init__.py
-│   ├── db.py                     # 数据库连接层
-│   ├── init_db.py                # 建表 + 幂等迁移脚本
-│   └── schema.sql                # 完整DDL（20张表）
+│   ├── db.py                      # 数据库连接（SQLite WAL）
+│   ├── init_db.py                 # 建表 + 幂等迁移（含日历字段迁移）
+│   └── schema.sql                 # 完整DDL（21张表）
 │
-├── pages/                        # Streamlit页面（纯UI，13个）
-│   ├── __init__.py
-│   ├── dashboard.py              # 每日工作台
-│   ├── tasks.py
-│   ├── calendar_view.py
-│   ├── timeline.py
-│   ├── ai_query.py               # AI问答（3种RAG + 行动建议执行）
-│   ├── rag_qa.py 🆕              # RAG问答（4种检索模式 + 来源引用）
-│   ├── business_brain.py 🆕      # 业务大脑预览（输入→分析→确认→执行）
-│   ├── files.py                  # 文件上传（Workflow Agent追踪）
-│   ├── daily_summary.py
-│   ├── projects.py               # 项目管理（阶段可视化）
-│   ├── clients.py
-│   ├── data_management.py        # 数据管理（含知识块入库 🆕）
-│   └── workflow_dashboard.py 🆕  # 工作流监控（运行/确认/失败/完成）
+├── pages/                         # 5 个页面（纯UI，零原始SQL）
+│   ├── 01_daily_workspace.py      # 每日工作台
+│   ├── 02_business_management.py  # 业务管理
+│   ├── 03_ai_assistant.py         # AI问答
+│   ├── 04_data_management.py      # 数据管理
+│   └── 05_timeline.py             # 时间轴（新增）
 │
-├── services/                     # 业务逻辑层（45+个文件）
-│   ├── __init__.py
-│   ├── ai_service.py             # AI统一调用（含detect_content_intent）
-│   ├── backup_service.py         # 数据库备份
-│   ├── client_service.py         # 客户CRUD
-│   ├── detail_service.py         # 详情查询
-│   ├── file_parser.py            # 文件解析路由
-│   ├── file_service.py           # 文件CRUD
-│   ├── knowledge_service.py      # 知识条目服务
-│   ├── knowledge_ingestion.py 🆕 # 文本切分 + 多渠道入库
-│   ├── markdown_service.py       # Markdown生成
-│   ├── obsidian_service.py       # Obsidian Vault写入+同步日志
-│   ├── obsidian_log_service.py   # Obsidian同步状态
-│   ├── project_service.py        # 项目CRUD
-│   ├── query_service.py          # AI自然语言查询
-│   ├── relation_service.py       # 关系网络（9种语义类型+图谱+风险/跟进）
-│   ├── search_service.py         # 统一搜索层 + semantic_search_chunks 🆕
-│   ├── summary_service.py        # 每日总结+随手记
-│   ├── task_service.py           # 任务CRUD
-│   ├── timeline_service.py       # 时间轴事件
-│   ├── rag_service.py            # RAG回答（chunks/keyword/semantic/hybrid）🆕
-│   ├── embedding_service.py      # Embedding服务 + chunk级别向量化 🆕
-│   ├── hybrid_search_service.py  # 混合搜索
-│   ├── action_suggestion_service.py  # AI行动建议
-│   ├── action_executor_service.py    # 建议执行引擎（9种动作类型）🆕
-│   ├── workflow_log_service.py   # 工作流日志（含run_id/step_id）
-│   ├── reminder_service.py       # 提醒服务
-│   │
-│   ├── workflow_definitions.py   # 工作流定义（8种类型）🆕
-│   ├── workflow_service.py 🆕    # 工作流引擎（运行/步骤/确认/重试）
-│   ├── workflow_engine.py        # 阶段管理+模板
-│   ├── workflow_agent_service.py # 统一编排入口
-│   ├── risk_detection_service.py # 风险检测
-│   ├── proactive_suggestion_service.py  # 主动工作流建议
-│   ├── document_action_service.py       # 文档动作分析
-│   │
-│   ├── feishu_service.py         # 飞书API（token+消息发送）
-│   ├── feishu_message_service.py # 飞书消息处理（命令+多轮上下文+确认式执行）
-│   ├── feishu_session_service.py # 飞书会话状态管理（30min过期）
-│   ├── feishu_file_service.py    # 飞书文件处理（下载→分析→记忆提取）
-│   ├── feishu_command_parser.py  # 飞书命令解析
-│   ├── feishu/ 🆕                # 飞书回复格式化模块
-│   │   ├── __init__.py
-│   │   └── reply_formatter.py    # 统一回复格式化（11个函数）
-│   │
-│   ├── business_brain/ 🆕        # 业务大脑模块
-│   │   ├── __init__.py
-│   │   ├── brain_service.py      # 统一入口 analyze_input + execute_actions
-│   │   ├── classifier.py         # 内容类型识别
-│   │   ├── extractor.py          # AI提取+JSON解析
-│   │   ├── entity_matcher.py     # 实体模糊匹配
-│   │   ├── action_planner.py     # 动作生成+工作流映射
-│   │   └── prompts.py            # 提示词管理
-│   │
-│   ├── memory_service.py         # 长期记忆（AI提取+幂等+搜索+重建）
-│   └── relation_service.py       # 关系图谱增强
+├── services/                      # 业务逻辑层
+│   ├── task_service.py            # 任务 CRUD + 搜索 + 日历标记
+│   ├── project_service.py         # 项目 CRUD
+│   ├── client_service.py          # 客户 CRUD
+│   ├── timeline_service.py        # 时间轴事件
+│   ├── file_service.py            # 文件记录管理
+│   ├── summary_service.py         # 随手记 + 每日总结
+│   ├── ai_service.py              # AI 统一调用（OpenAI-compatible）
+│   ├── rag_service.py             # RAG（关键词/语义/混合/知识块）
+│   ├── search_service.py          # 统一搜索（7表 + 语义chunks）
+│   ├── unified_qa_service.py      # 统一问答（4层自动策略）
+│   ├── data_management_service.py # 数据管理（统计/备份/清空/导出）
+│   ├── backup_service.py          # 数据库备份
+│   ├── relation_service.py        # 关系网络（9种语义类型）
+│   ├── knowledge_service.py       # 知识条目管理
+│   ├── embedding_service.py       # numpy embedding + 语义搜索
+│   ├── memory_service.py          # 长期记忆
+│   ├── workflow_engine.py         # 项目阶段管理
+│   ├── ...（其余服务文件保留备用）
+│   └── business_brain/            # 业务大脑模块（保留备用）
+│       ├── brain_service.py
+│       ├── classifier.py
+│       ├── extractor.py
+│       ├── entity_matcher.py
+│       ├── action_planner.py
+│       └── prompts.py
 │
 ├── utils/
-│   ├── __init__.py
-│   ├── date_utils.py
-│   ├── display_utils.py          # 统一显示格式化（20+函数+常量）
+│   ├── date_utils.py              # 日期工具
+│   ├── display_utils.py           # 统一显示格式化
 │   └── text_utils.py
 │
-├── data/
-│   ├── app.db                    # SQLite数据库
-│   └── uploads/                  # 上传文件目录
-│       └── feishu/               # 飞书文件子目录
+├── scripts/
+│   └── reset_business_data.py     # 命令行清空数据脚本
 │
-├── test_feishu_session.py        # 22个测试（Session+多轮上下文+确认式执行+事件去重）
-└── test_feishu_memory.py         # 16个测试（记忆+关系+主动建议+飞书命令）
+├── archive/
+│   └── old_pages/                  # 13 个旧页面归档
+│
+├── backup/                        # 数据库备份
+│   ├── app_before_refactor_20260611_163928.db
+│   └── app_before_reset_20260611_165155.db
+│
+└── data/
+    ├── app.db                     # SQLite数据库（已清空业务数据）
+    ├── backups/
+    └── uploads/
 ```
 
 ---
 
-## 5. 数据库表（20张）
+## 5. 数据库表（21张）
 
-| 表名 | 说明 | 关键字段 |
-|------|------|----------|
-| `tasks` | 任务 | title, status, priority, due_date, project_id, client_id |
-| `projects` | 项目 | name, status, client_id |
-| `clients` | 客户 | name, contact_info |
-| `files` | 文件 | filename, file_hash, summary, key_points, tags, project_id, client_id |
-| `daily_notes` | 随手记 | content, note_date |
-| `daily_summaries` | 每日总结 | summary_date, content |
-| `timeline_events` | 时间轴 | event_type, title, project_id, client_id, tags, metadata |
-| `tags` | 标签 | name (UNIQUE), type |
-| `relations` | 关系网络 | source_type, source_id, target_type, target_id, relation_type, description |
-| `knowledge_items` | 知识条目 | source_type, source_id, title, content, tags |
-| `knowledge_embeddings` | 向量存储 | knowledge_item_id (UNIQUE), embedding_model, embedding (JSON) |
-| `knowledge_chunks` 🆕 | 知识块 | source_type, source_id, source_title, content, chunk_index, metadata_json, embedding |
-| `workflow_logs` | 工作流日志 | workflow_type, source_type, source_id, run_id 🆕, step_id 🆕, status, message, details |
-| `workflow_runs` 🆕 | 工作流运行 | workflow_type, status, trigger_info, preview_json, final_result_json, error_step_name, error_message |
-| `workflow_steps` 🆕 | 工作流步骤 | run_id, step_name, step_order, status, input_summary, output_summary, error_message |
-| `processed_feishu_events` | 飞书事件去重 | event_id (UNIQUE), message_id, status |
-| `obsidian_sync_logs` | Obsidian同步 | source_type+source_id (UNIQUE), content_hash, obsidian_path |
-| `memory_items` | 长期记忆 | memory_type, title, content, importance, client_id, project_id, task_id |
-| `feishu_sessions` | 飞书会话 | user_key (UNIQUE), current_mode, pending_actions_json, last_analysis_json, expires_at |
-| `project_stages` | 项目阶段 | project_id, stage_name, stage_order, status, started_at, completed_at |
-| `workflow_templates` | 工作流模板 | template_name, template_type, template_json |
-
----
-
-## 6. 已完成里程碑
-
-### Phase 1-12: MVP核心 + 时间轴 + 搜索 + 关系 + RAG + 数据管理 + Obsidian同步 ✅
-详见历史记录，已稳定运行。
-
-### Phase 13: 日历同步 + 提醒通知 + 飞书通知第一版 ✅
-### Phase 14: 飞书多轮上下文 + Session 状态管理 + 确认式执行 ✅
-### Phase 15: 长期记忆 + 关系图谱增强 + 主动工作流第一版 ✅
-### Phase 16: Workflow Agent V1（工作流引擎）✅
-
-### Workflow Agent V2 🆕
-- workflow_runs / workflow_steps 表（运行+步骤追踪）
-- workflow_service.py（运行生命周期、步骤执行、确认/取消/重试）
-- 8 种工作流类型（file_processing/feishu_message/task_creation/project_update/client_update/timeline_record/note_creation/summary_creation）
-- workflow_definitions.py 注册表模式
-- 人工确认机制（generate_preview → waiting_confirmation → confirm/cancel）
-- 失败重试（retry_run 重置所有步骤）
-- 工作流监控页面（pages/workflow_dashboard.py）
-- feishu_file_service.py 和 feishu_message_service.py 全量接入 Workflow Agent
-- pages/files.py 接入 Workflow Agent 追踪
-
-### Business Brain V1 🆕
-- services/business_brain/ 模块（6 个文件）
-- 9 种内容类型识别 + 9 种动作类型
-- 结构化 JSON 输出（content_type/title/summary/entities/suggested_actions/confidence）
-- 已有实体模糊匹配（客户/项目/标签）
-- 动作→工作流映射（create_task→task_creation 等）
-- 业务大脑预览页面（pages/business_brain.py）
-- action_executor_service.py 新增 3 种动作类型（create_note/update_project/update_client）
-
-### RAG + 语义搜索 V1 🆕
-- knowledge_chunks 表（文本块+向量存储）
-- knowledge_ingestion.py（文本切分 500-800 chars + 多渠道入库）
-- numpy 批量余弦相似度搜索
-- embedding_service.py 新增 chunk 级别函数
-- search_service.py 新增 semantic_search_chunks()
-- rag_service.py 新增 answer_with_chunks()（四模式）
-- RAG 问答页面（pages/rag_qa.py）
-- 数据管理页面新增"知识块入库"标签
-
-### Feishu Reply Optimization V1 🆕
-- services/feishu/reply_formatter.py（11 个格式化函数）
-- 配置化回复风格（FEISHU_REPLY_STYLE/MAX_ITEMS/ENABLE_EMOJI/SHOW_DEBUG）
-- 移除所有 `**` `###` `---` Markdown 污染
-- 错误自动脱敏（移除 traceback/JSON/内部 ID）
-- _build_file_reply 从 54 行精简至 7 行
-- _build_qa_reply 从 21 行精简至 5 行
-- feishu_message_service.py 错误模式统一替换
-- reminder_service.py / feishu_api.py 同步清理
+| 表名 | 说明 |
+|------|------|
+| `tasks` | 任务（含 show_on_calendar / calendar_date 日历字段） |
+| `projects` | 项目 |
+| `clients` | 客户 |
+| `files` | 文件 |
+| `daily_notes` | 随手记 |
+| `daily_summaries` | 每日总结 |
+| `timeline_events` | 时间轴事件 |
+| `tags` | 标签 |
+| `relations` | 关系网络 |
+| `knowledge_items` | 知识条目 |
+| `knowledge_embeddings` | 向量存储（numpy） |
+| `knowledge_chunks` | 知识块 |
+| `workflow_logs` | 工作流日志 |
+| `workflow_runs` | 工作流运行 |
+| `workflow_steps` | 工作流步骤 |
+| `workflow_templates` | 工作流模板 |
+| `memory_items` | 长期记忆 |
+| `project_stages` | 项目阶段 |
+| `obsidian_sync_logs` | Obsidian同步日志 |
+| `processed_feishu_events` | 飞书事件去重（保留备用） |
+| `feishu_sessions` | 飞书会话（保留备用） |
 
 ---
 
-## 7. 当前存在的问题和 Bug
+## 6. 新增功能（重构 V2）
 
-| 问题 | 严重程度 | 说明 |
-|------|----------|------|
-| Streamlit session_state 依赖 | 低 | 浏览器刷新后 session_state 丢失（已防崩溃） |
-| AI API 调用超时 | 低 | 主动建议中的 AI 总结生成可能较慢 |
-| External package SSL | 中 | pip SSL 证书问题，Chroma 无法安装，当前使用 numpy 方案 |
-| 测试数据不包含新功能上下文 | 低 | seed_data.py 生成的数据不含 Workflow Agent/Business Brain 等新概念 |
+### 6.1 随手记保存修复
+- **Bug**: 保存按钮调用 `add_event()` 只写入 `timeline_events`，`get_today_notes()` 读取 `daily_notes` 表
+- **修复**: 改为调用 `create_daily_note()`，同时写入 `daily_notes` 和 `timeline_events`
 
----
+### 6.2 左侧菜单中文化
+- `app.py` 使用 `st.navigation()` 统一路由，5个页面均为中文标题
+- 不再显示 "app" 入口和英文页面名
+- 子页面移除 `st.set_page_config()`（由导航统一管理）
 
-## 8. 下一阶段开发建议
+### 6.3 时间轴页面
+- 新增 `pages/05_timeline.py`
+- 支持日期范围筛选、事件类型分组筛选、关键词搜索、手动记录
 
-### 8.1 主动式 Agent（Proactive Agent）
-- 定时扫描业务状态，自动推送建议到飞书
-- 基于规则的触发器（逾期/停滞/风险）
-- 与现有 proactive_suggestion_service 集成
+### 6.4 日历视图
+- 每日工作台新增日历视图模块
+- 支持月份切换（上/下月）
+- 被标记任务日期红色高亮，今日蓝色标记
+- 显示每日任务数量和标题
 
-### 8.2 向量检索升级
-- FAISS IVF/HNSW 索引（已安装 FAISS 1.14.2，faiss_search() 接口已预留）
-- 从 numpy 方案迁移到 FAISS IndexIDMap
+### 6.5 任务日历标记
+- `tasks` 表新增 `show_on_calendar` (INTEGER DEFAULT 0) 和 `calendar_date` (TEXT)
+- 每日工作台任务行：标记/取消按钮
+- 业务管理任务详情：日历日期选择 + 标记/取消按钮
+- 新增服务函数: `mark_task_on_calendar()`, `unmark_task_from_calendar()`, `get_calendar_tasks()`
+- 日历日期优先级: `calendar_date` > `due_date`
 
-### 8.3 标签系统完善
-- 标签管理页面
-- 按标签筛选实体
-- tag_item 动作一键执行
-
-### 8.4 UI/UX 改进
-- 暗色模式
-- 数据可视化图表（项目进度、任务趋势、时间热力图）
-
-### 8.5 基础设施升级（谨慎）
-- FastAPI 后端（替换 Streamlit 内置服务器）
-- PostgreSQL 迁移（多用户场景）
+### 6.6 页面布局优化
+- 今日随手记改为左输入 + 右总览的左右布局
+- 输入框高度 120px，总览显示最近 5 条
 
 ---
 
-## 9. 启动方式
+## 7. 当前数据状态
+
+所有业务表已清空，表结构完整保留：
+
+```
+tasks: 0 | projects: 0 | clients: 0 | files: 0
+daily_summaries: 0 | timeline_events: 0
+knowledge_items: 0 | knowledge_embeddings: 0
+relations: 0 | memory_items: 0
+...
+总记录数: 0
+```
+
+---
+
+## 8. 启动方式
 
 ```bash
-# 1. 进入项目目录
 cd /Users/zxk/Desktop/AI_Project/obs_phase1/ai-office-assistant
 
-# 2. 安装依赖（首次）
+# 安装依赖（首次）
 pip install -r requirements.txt
 
-# 3. 配置 .env（AI密钥+飞书凭证+Obsidian路径+回复配置）
+# 配置 .env（AI密钥 + Obsidian路径等）
 
-# 4. 生成测试数据（首次）
-python3 seed_data.py
-
-# 5. 启动 Streamlit
+# 启动
 streamlit run app.py
 # → http://localhost:8501
 
-# 6. 启动飞书 webhook（可选）
-uvicorn feishu_api:app --host 0.0.0.0 --port 8080
-
-# 7. 执行知识入库（在「数据管理」→「知识块入库」或代码调用）
-python3 -c "from services.knowledge_ingestion import ingest_all; ingest_all()"
-
-# 8. 运行测试
-python test_feishu_session.py   # 22 tests
-python test_feishu_memory.py    # 16 tests
+# 清空数据（需要时）
+python scripts/reset_business_data.py
 ```
 
 ---
 
-## 10. 环境变量
+## 9. 环境变量
 
 ```env
 # AI Provider
@@ -505,38 +243,32 @@ EMBEDDING_MODEL=text-embedding-v1
 OBSIDIAN_VAULT_PATH=/Users/zxk/Documents/Obsidian_Vault
 
 # Database & Storage
-DATABASE_PATH=/Users/zxk/Desktop/AI_Project/obs_phase1/ai-office-assistant/data/app.db
-UPLOAD_DIR=/Users/zxk/Desktop/AI_Project/obs_phase1/ai-office-assistant/data/uploads
-
-# 飞书应用机器人
-FEISHU_APP_ID=cli_xxx
-FEISHU_APP_SECRET=xxx
-FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-
-# 飞书回复优化 🆕
-FEISHU_REPLY_STYLE=concise
-FEISHU_REPLY_MAX_ITEMS=5
-FEISHU_REPLY_MAX_SUMMARY_LENGTH=120
-FEISHU_ENABLE_EMOJI=true
-FEISHU_SHOW_DEBUG=false
+DATABASE_PATH=./data/app.db
+UPLOAD_DIR=./data/uploads
 ```
 
 ---
 
-## 11. 架构约束（开发注意事项）
+## 10. 架构约束
 
-1. **pages/ 只能放 UI 代码**，所有 DB 操作和业务逻辑在 services/
+1. **pages/ 只放 UI 代码**，所有 DB 操作和业务逻辑在 services/
 2. **数据库查询结果是 `dict`**，fetch_one/fetch_all 内部已转
-3. **每次 DB 操作创建新连接**，无连接池
-4. **`init_database()` 必须幂等**（CREATE TABLE IF NOT EXISTS + try/except 迁移）
-5. **事件记录 + 关系创建是副作用**，add_event() 自动建立关系
-6. **关系创建是幂等的**，add_relation() 先查后插
-7. **知识条目同步是幂等的**，_upsert_knowledge() 通过 source_type+source_id UNIQUE 去重
-8. **记忆保存是幂等的**，save_memory_item() 通过 source_type+source_id+memory_type+title 去重
-9. **飞书事件去重**，processed_feishu_events 表 UNIQUE 约束 + 内存检查
-10. **feishu_api.py 只负责路由**，不写复杂业务逻辑
-11. **飞书消息回复只在 feishu_api.py 中调用一次** reply_message()
-12. **feishu_session_service.py 双重存储**：DB session + 内存 fallback
-13. **飞书回复统一格式化** 🆕：所有 reply_text 必须经 reply_formatter.py 生成
-14. **Business Brain 不写 DB** 🆕：analyze_input() 只分析和返回结构化结果，执行由 Workflow Agent 负责
-15. **知识入库幂等** 🆕：ingest 前先清除同 source 旧 chunks，再重新切分入库
+3. **app.py 使用 `st.navigation()` 统一路由**，子页面不再调用 `st.set_page_config()`
+4. **页面末尾必须调用 `render()`**，Streamlit 不会自动调用
+5. **AI 问答不编造本地数据**，无匹配时明确说明
+6. **清空数据前必须自动备份**
+7. **当前不依赖 Chroma**，使用 numpy embedding 方案
+8. **当前不做飞书集成**
+9. **随手记保存使用 `create_daily_note()`**，自动同步写入 daily_notes 和 timeline_events
+10. **日历日期优先级**: calendar_date > due_date
+
+---
+
+## 11. 下一阶段建议
+
+1. **录入真实数据** — 从每日工作台开始手动录入任务、项目、客户
+2. **快速输入 AI 解析** — 自然语言输入自动识别客户/项目/任务/日期
+3. **向量检索升级** — numpy → FAISS（FAISS 已安装，接口已预留）
+4. **标签系统完善** — 标签管理、按标签筛选
+5. **UI 改进** — 数据可视化图表
+6. **日历增强** — 点击日期查看当天任务详情、拖拽修改日期

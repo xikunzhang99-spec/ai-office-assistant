@@ -156,6 +156,9 @@ MIGRATIONS = [
     )""",
     "ALTER TABLE workflow_logs ADD COLUMN run_id INTEGER",
     "ALTER TABLE workflow_logs ADD COLUMN step_id INTEGER",
+    # Calendar: task calendar marking fields
+    "ALTER TABLE tasks ADD COLUMN show_on_calendar INTEGER DEFAULT 0",
+    "ALTER TABLE tasks ADD COLUMN calendar_date TEXT",
     # Phase 4: RAG chunk-level knowledge
     "ALTER TABLE knowledge_chunks ADD COLUMN embedding TEXT",
     """CREATE TABLE IF NOT EXISTS knowledge_chunks (
@@ -168,6 +171,12 @@ MIGRATIONS = [
         metadata_json TEXT,
         created_at TEXT,
         updated_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS task_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT
     )""",
 ]
 

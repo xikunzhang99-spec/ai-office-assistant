@@ -1,49 +1,19 @@
-import streamlit as st
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from database.init_db import init_database
+import streamlit as st
 
+st.set_page_config(page_title="AI办公助手", page_icon="📋", layout="wide")
+
+from database.init_db import init_database
 init_database()
 
-st.set_page_config(page_title="AI办公助理", page_icon="📋", layout="wide")
-
-pages = {
-    "每日工作台": "pages.dashboard",
-    "任务管理": "pages.tasks",
-    "日历视图": "pages.calendar_view",
-    "时间轴": "pages.timeline",
-    "AI问答": "pages.ai_query",
-    "RAG问答": "pages.rag_qa",
-    "业务大脑": "pages.business_brain",
-    "文件上传": "pages.files",
-    "每日总结": "pages.daily_summary",
-    "项目管理": "pages.projects",
-    "客户管理": "pages.clients",
-    "数据管理": "pages.data_management",
-    "工作流监控": "pages.workflow_dashboard",
-}
-
-st.sidebar.title("AI办公助理")
-st.sidebar.divider()
-
-selected = st.sidebar.radio("导航", list(pages.keys()))
-
-st.sidebar.divider()
-with st.sidebar:
-    if st.button("备份数据库", type="secondary", use_container_width=True):
-        try:
-            from services.backup_service import backup_database
-            path = backup_database()
-            st.success(f"备份完成: {path}")
-        except Exception as e:
-            st.error(f"备份失败: {str(e)}")
-
-module_name = pages[selected]
-try:
-    module = __import__(module_name, fromlist=["render"])
-    module.render()
-except Exception as e:
-    st.error(f"页面加载失败: {str(e)}")
+# 使用 st.navigation 定义所有页面，主脚本不显示为独立页面
+pg = st.navigation([
+    st.Page("pages/01_daily_workspace.py", title="每日工作台", icon="📋"),
+    st.Page("pages/05_timeline.py", title="时间轴", icon="📜"),
+    st.Page("pages/02_business_management.py", title="业务管理", icon="📊"),
+])
+pg.run()

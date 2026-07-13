@@ -60,7 +60,7 @@ def get_or_create_task(title: str, description: str = "", priority: str = "mediu
 
 def update_task(task_id: int, **kwargs) -> bool:
     old_task = get_task(task_id)
-    allowed = ["title", "description", "status", "priority", "due_date", "project_id", "client_id", "tags"]
+    allowed = ["title", "description", "status", "priority", "due_date", "project_id", "client_id", "tags", "show_on_calendar", "calendar_date"]
     updates = []
     values = []
     for k in allowed:
@@ -167,6 +167,60 @@ def get_overdue_tasks() -> list:
     return fetch_all(
         "SELECT * FROM tasks WHERE status != 'done' AND status != 'cancelled' AND due_date < ? AND due_date != '' ORDER BY due_date ASC",
         (today_str(),),
+    )
+
+
+def mark_task_on_calendar(task_id: int, calendar_date: str = None) -> bool:
+    """标记任务显示到日历。calendar_date 为空则使用 due_date。"""
+    task = get_task(task_id)
+    if not task:
+        return False
+    cal_date = calendar_date or task.get("due_date") or ""
+    execute(
+        "UPDATE tasks SET show_on_calendar = 1, calendar_date = ?, updated_at = ? WHERE id = ?",
+        (cal_date, now_str(), task_id),
+    )
+    return True
+
+
+def unmark_task_from_calendar(task_id: int) -> bool:
+    """取消任务的日历标记。"""
+    execute(
+        "UPDATE tasks SET show_on_calendar = 0, calendar_date = NULL, updated_at = ? WHERE id = ?",
+        (now_str(), task_id),
+    )
+    return True
+
+
+def get_calendar_tasks(year: int, month: int) -> list:
+    """获取指定月份被标记到日历的任务。"""
+    import calendar as cal_mod
+    start_date = f"{year}-{month:02d}-01"
+    last_day = cal_mod.monthrange(year, month)[1]
+    end_date = f"{year}-{month:02d}-{last_day:02d}"
+
+    return fetch_all(
+        """SELECT * FROM tasks
+           WHERE show_on_calendar = 1
+             AND date(COALESCE(calendar_date, due_date)) BETWEEN date(?) AND date(?)
+           ORDER BY COALESCE(calendar_date, due_date) ASC""",
+        (start_date, end_date),
+    )
+
+
+def add_task_note(task_id: int, content: str) -> int:
+    """为任务添加备注，返回备注ID。"""
+    return insert(
+        "INSERT INTO task_notes (task_id, content, created_at) VALUES (?, ?, ?)",
+        (task_id, content, now_str()),
+    )
+
+
+def get_task_notes(task_id: int) -> list:
+    """获取任务的所有备注，按时间倒序。"""
+    return fetch_all(
+        "SELECT * FROM task_notes WHERE task_id = ? ORDER BY created_at DESC",
+        (task_id,),
     )
 
 
